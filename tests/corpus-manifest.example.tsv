@@ -1,0 +1,5 @@
+# mdictlib private-corpus manifest, version 1
+# Paths are relative to MDICT_CORPUS_DIR. Keep rows sorted by path.
+path	kind	bytes	sha256	entries
+dictionaries/example.mdx	mdx	123456	0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef	1000
+resources/example.mdd	mdd	654321	fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210	250

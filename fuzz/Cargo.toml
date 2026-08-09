@@ -1,0 +1,64 @@
+[package]
+name = "mdictlib-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+mdictlib = { path = "..", features = ["lzo"] }
+
+[[bin]]
+name = "header_bytes"
+path = "fuzz_targets/header_bytes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "compression_block"
+path = "fuzz_targets/compression_block.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "whole_file"
+path = "fuzz_targets/whole_file.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "key_index"
+path = "fuzz_targets/key_index.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "key_block"
+path = "fuzz_targets/key_block.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "record_index"
+path = "fuzz_targets/record_index.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "record_span"
+path = "fuzz_targets/record_span.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = []

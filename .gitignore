@@ -1,0 +1,8 @@
+target/
+
+/tmp*
+
+draft/
+
+fuzz/artifacts/
+fuzz/corpus/

@@ -1,0 +1,43 @@
+[package]
+name = "mdictlib"
+version = "0.1.0"
+edition = "2024"
+autobins = false
+publish = false
+authors = ["Lonelam <laizenan@gmail.com>"]
+description = "Library-first Rust parser for MDict .mdx and .mdd dictionaries"
+license = "MIT"
+readme = "README.md"
+documentation = "https://docs.rs/mdictlib"
+homepage = "https://github.com/lonelam/mdictlib"
+repository = "https://github.com/lonelam/mdictlib"
+keywords = ["mdict", "mdx", "mdd", "dictionary", "parser"]
+categories = ["parser-implementations", "encoding"]
+rust-version = "1.97"
+include = [
+    "/src/**",
+    "/examples/**",
+    "/tests/**",
+    "/Cargo.toml",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE",
+    "/CONTRIBUTING.md",
+]
+
+[features]
+default = []
+lzo = ["dep:lzokay"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
+
+[dependencies]
+encoding_rs = "0.8"
+miniz_oxide = "0.9"
+
+[dependencies.lzokay]
+version = "2.0.1"
+optional = true
+default-features = false
+features = ["decompress", "std"]

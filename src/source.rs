@@ -1,0 +1,66 @@
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+use crate::error::{Error, Result};
+use crate::limits::{checked_u64, try_reserve_vec};
+
+pub struct FileSource {
+    path: PathBuf,
+    file: Mutex<File>,
+    len: u64,
+}
+
+impl std::fmt::Debug for FileSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FileSource")
+            .field("path", &self.path)
+            .field("len", &self.len)
+            .finish()
+    }
+}
+
+impl FileSource {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        let file = File::open(path)?;
+        let len = file.metadata()?.len();
+        if len == 0 {
+            return Err(Error::InvalidFormat("empty input file"));
+        }
+        Ok(Self {
+            path: path.to_path_buf(),
+            file: Mutex::new(file),
+            len,
+        })
+    }
+
+    pub fn read_exact_at(&self, offset: u64, len: usize, context: &'static str) -> Result<Vec<u8>> {
+        let len_u64 = checked_u64(len, context)?;
+        self.ensure_range(offset, len_u64, context)?;
+
+        let mut output = Vec::new();
+        try_reserve_vec(&mut output, len, context)?;
+        output.resize(len, 0);
+        let mut file = self
+            .file
+            .lock()
+            .map_err(|_| Error::InvalidFormat("source mutex poisoned"))?;
+        file.seek(SeekFrom::Start(offset))?;
+        file.read_exact(&mut output)?;
+        Ok(output)
+    }
+
+    pub fn ensure_range(&self, offset: u64, len: u64, context: &'static str) -> Result<()> {
+        let end = offset
+            .checked_add(len)
+            .ok_or(Error::InvalidFormat("source range overflow"))?;
+        if end > self.len {
+            let needed = usize::try_from(len).unwrap_or(usize::MAX);
+            let remaining = usize::try_from(self.len.saturating_sub(offset)).unwrap_or(usize::MAX);
+            return Err(Error::truncated(context, needed, remaining));
+        }
+        Ok(())
+    }
+}

@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  platform-tests:
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy
+      - name: Test default features
+        run: cargo test --locked --all-targets
+      - name: Test all features (LZO)
+        run: cargo test --locked --all-targets --all-features
+
+  quality:
+    name: Formatting, lint, docs, fuzz build, package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy
+      - name: Install pinned fuzz toolchain
+        run: rustup toolchain install nightly-2026-08-09 --profile minimal
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Lint every target and feature
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: Test rustdoc examples
+        run: cargo test --locked --doc --all-features
+      - name: Build documentation without warnings
+        env:
+          RUSTDOCFLAGS: -D warnings -D missing_docs -D rustdoc::broken_intra_doc_links
+        run: cargo doc --locked --all-features --no-deps
+      - name: Install pinned cargo-fuzz
+        run: cargo install cargo-fuzz --version 0.13.2 --locked
+      - name: Fetch the locked fuzz dependency set
+        run: cargo fetch --locked --manifest-path fuzz/Cargo.toml
+      - name: Build sanitizer-instrumented fuzz targets
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: cargo +nightly-2026-08-09 fuzz build
+      - name: Run bounded coverage-guided fuzz smoke campaigns
+        shell: bash
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: |
+          for target in header_bytes compression_block whole_file key_index key_block record_index record_span; do
+            cargo +nightly-2026-08-09 fuzz run "$target" -- \
+              -runs=32 -max_len=1048576 -rss_limit_mb=1024
+          done
+          git diff --exit-code -- fuzz/Cargo.lock
+      - name: Fetch the locked package dependency set
+        run: cargo fetch --locked
+      - name: Build and verify the package offline
+        run: cargo package --locked --offline
+      - name: Test the extracted package offline
+        shell: bash
+        run: |
+          package_root="$(mktemp -d)"
+          package_path="$(find target/package -maxdepth 1 -name 'mdictlib-*.crate' -print -quit)"
+          test -n "$package_path"
+          tar --extract --gzip --file "$package_path" --directory "$package_root"
+          package_manifest="$(find "$package_root" -mindepth 2 -maxdepth 2 -name Cargo.toml -print -quit)"
+          test -n "$package_manifest"
+          cargo test --locked --offline --all-targets --all-features \
+            --manifest-path "$package_manifest"
