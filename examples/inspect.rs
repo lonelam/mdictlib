@@ -6,16 +6,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
     let mode = args
         .next()
-        .ok_or("usage: inspect <mdx|mdd> <path> [lookup_key]")?;
+        .ok_or("usage: inspect <mdx|mdd> <path> [lookup_key|--count-only]")?;
     let path = args
         .next()
-        .ok_or("usage: inspect <mdx|mdd> <path> [lookup_key]")?;
+        .ok_or("usage: inspect <mdx|mdd> <path> [lookup_key|--count-only]")?;
     let lookup_key = args.next();
+    if args.next().is_some() {
+        return Err("usage: inspect <mdx|mdd> <path> [lookup_key|--count-only]".into());
+    }
+    let count_only = lookup_key.as_deref() == Some("--count-only");
 
     match mode.as_str() {
         "mdx" => {
             let file = MdxFile::open(&path)?;
             println!("entries={}", file.len());
+            if count_only {
+                return Ok(());
+            }
             println!("title={:?}", file.header().title());
             println!(
                 "description_present={}",
@@ -45,6 +52,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "mdd" => {
             let file = MddFile::open(&path)?;
             println!("entries={}", file.len());
+            if count_only {
+                return Ok(());
+            }
             println!("title={:?}", file.header().title());
             if let Some(key) = lookup_key {
                 match file.lookup(&key)? {

@@ -5,7 +5,8 @@ use std::sync::{Arc, Barrier};
 use mdictlib::{Error, KeyOrdinal, Limits, MddFile, MdxFile, OpenOptions, Passcode};
 
 use support::{
-    FixtureBuilder, FixtureCompression, FixtureEncoding, FixturePasscode, independent_ripemd128,
+    FixtureBuilder, FixtureCompression, FixtureEncoding, FixturePasscode, independent_adler32,
+    independent_ripemd128,
 };
 
 #[test]
@@ -22,6 +23,162 @@ fn independent_ripemd128_matches_published_vectors() {
         hex(&independent_ripemd128(b"abc")),
         "c14a12199c66e4ba84636b0f69144c77"
     );
+}
+
+#[test]
+fn coherent_legacy_v2_keyword_index_round_trips_through_the_public_api() {
+    let fixture = FixtureBuilder::mdx([
+        ("alpha", "first"),
+        ("duplicate", "second"),
+        ("duplicate", "third"),
+        ("omega", "fourth"),
+    ])
+    .key_blocks(vec![2, 2])
+    .compression(FixtureCompression::Zlib)
+    .legacy_keyword_index_layout()
+    .build();
+
+    let header_start = fixture.layout.keyword_header_offset;
+    let checksum = independent_adler32(&fixture.bytes[header_start..header_start + 40]);
+    assert_eq!(
+        &fixture.bytes[header_start + 40..header_start + 44],
+        &checksum.to_le_bytes()
+    );
+    assert_ne!(checksum.to_be_bytes(), checksum.to_le_bytes());
+
+    let dictionary_file = fixture.write("legacy-v2-keyword-index");
+    let dictionary = MdxFile::open(dictionary_file.path()).unwrap();
+    assert_eq!(dictionary.len(), 4);
+    assert_eq!(
+        dictionary
+            .keys()
+            .map(|key| key.unwrap().into_key())
+            .collect::<Vec<_>>(),
+        ["alpha", "duplicate", "duplicate", "omega"]
+    );
+    assert_eq!(
+        dictionary.lookup("omega").unwrap().unwrap().text(),
+        "fourth"
+    );
+    assert_eq!(
+        dictionary
+            .entries()
+            .map(|entry| entry.unwrap().text().to_owned())
+            .collect::<Vec<_>>(),
+        ["first", "second", "third", "fourth"]
+    );
+}
+
+#[test]
+fn legacy_v2_keyword_index_requires_the_exact_checksum_layout_signal() {
+    let mut wrong_checksum = FixtureBuilder::mdx([("alpha", "record")])
+        .legacy_keyword_index_layout()
+        .build();
+    let checksum_offset = wrong_checksum.layout.keyword_header_offset + 40;
+    wrong_checksum.bytes[checksum_offset..checksum_offset + 4].fill(0);
+    let dictionary_file = wrong_checksum.write("legacy-v2-wrong-header-checksum");
+    assert!(matches!(
+        MdxFile::open(dictionary_file.path()),
+        Err(Error::ChecksumMismatch {
+            context: "keyword section header",
+            ..
+        })
+    ));
+
+    let mut canonical_checksum = FixtureBuilder::mdx([("alpha", "record")])
+        .legacy_keyword_index_layout()
+        .build();
+    let header_start = canonical_checksum.layout.keyword_header_offset;
+    let checksum = independent_adler32(&canonical_checksum.bytes[header_start..header_start + 40]);
+    canonical_checksum.bytes[header_start + 40..header_start + 44]
+        .copy_from_slice(&checksum.to_be_bytes());
+    let dictionary_file = canonical_checksum.write("canonical-checksum-unterminated-summaries");
+    assert!(MdxFile::open(dictionary_file.path()).is_err());
+}
+
+#[test]
+fn legacy_v2_keyword_index_rejects_trailing_bytes_and_wrong_sums() {
+    let trailing = FixtureBuilder::mdx([("alpha", "record")])
+        .legacy_keyword_index_layout()
+        .key_index_trailing_bytes([0xde, 0xad])
+        .build();
+    let dictionary_file = trailing.write("legacy-v2-trailing-key-index");
+    assert_invalid_data_contains(
+        MdxFile::open(dictionary_file.path()).unwrap_err(),
+        "trailing bytes",
+    );
+
+    let mut wrong_entry_sum = FixtureBuilder::mdx([("alpha", "A"), ("omega", "O")])
+        .key_blocks(vec![1, 1])
+        .legacy_keyword_index_layout()
+        .build();
+    wrong_entry_sum.set_keyword_u64(1, 3);
+    let dictionary_file = wrong_entry_sum.write("legacy-v2-wrong-entry-sum");
+    assert_invalid_data_contains(
+        MdxFile::open(dictionary_file.path()).unwrap_err(),
+        "keyword entry count mismatch",
+    );
+
+    let mut wrong_size_sum = FixtureBuilder::mdx([("alpha", "A"), ("omega", "O")])
+        .key_blocks(vec![1, 1])
+        .legacy_keyword_index_layout()
+        .build();
+    let actual_key_blocks_len = wrong_size_sum
+        .layout
+        .key_blocks
+        .iter()
+        .map(|range| range.end - range.start)
+        .sum::<usize>();
+    wrong_size_sum.set_keyword_u64(4, u64::try_from(actual_key_blocks_len + 1).unwrap());
+    let dictionary_file = wrong_size_sum.write("legacy-v2-wrong-block-size-sum");
+    assert_invalid_data_contains(
+        MdxFile::open(dictionary_file.path()).unwrap_err(),
+        "keyword blocks length mismatch",
+    );
+}
+
+#[test]
+fn legacy_v2_keyword_index_rejects_malformed_and_mismatched_summaries() {
+    let mut malformed_text = FixtureBuilder::mdx([("alpha", "record")])
+        .legacy_keyword_index_layout()
+        .build();
+    let key_index = malformed_text.layout.key_index_block.clone();
+    malformed_text.set_uncompressed_payload_byte(&key_index, 10, 0xff);
+    let dictionary_file = malformed_text.write("legacy-v2-malformed-summary-text");
+    assert!(matches!(
+        MdxFile::open(dictionary_file.path()),
+        Err(Error::Decode {
+            context: "keyword block first key",
+            encoding: "utf-8",
+        })
+    ));
+
+    let mut malformed = FixtureBuilder::mdx([("alpha", "record")])
+        .legacy_keyword_index_layout()
+        .build();
+    let key_index = malformed.layout.key_index_block.clone();
+    malformed.set_uncompressed_payload_byte(&key_index, 9, 0xff);
+    let dictionary_file = malformed.write("legacy-v2-malformed-summary-length");
+    assert!(matches!(
+        MdxFile::open(dictionary_file.path()),
+        Err(Error::Truncated {
+            context: "keyword block first key",
+            ..
+        })
+    ));
+
+    let mismatched = FixtureBuilder::mdx([("alpha", "A"), ("omega", "O")])
+        .legacy_keyword_index_layout()
+        .key_summaries([("delta", "omega")])
+        .build();
+    let dictionary_file = mismatched.write("legacy-v2-mismatched-boundary-summary");
+    let dictionary = MdxFile::open(dictionary_file.path()).unwrap();
+    assert!(matches!(
+        dictionary.key_at(KeyOrdinal::new(0)),
+        Err(Error::InvalidFormat(
+            "keyword block summaries do not match decoded boundary keys"
+        ))
+    ));
 }
 
 #[test]
@@ -505,6 +662,16 @@ fn assert_limit(error: Error, expected_limit: &str) {
     match error {
         Error::LimitExceeded { limit, .. } => assert_eq!(limit, expected_limit),
         other => panic!("expected {expected_limit} limit error, got {other}"),
+    }
+}
+
+fn assert_invalid_data_contains(error: Error, expected: &str) {
+    match error {
+        Error::InvalidData(message) => assert!(
+            message.contains(expected),
+            "expected invalid-data message containing {expected:?}, got {message:?}"
+        ),
+        other => panic!("expected invalid data containing {expected:?}, got {other}"),
     }
 }
 

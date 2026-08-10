@@ -32,6 +32,12 @@ pub struct KeyIndex {
     pub retained_bytes: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KeywordIndexLayout {
+    Canonical,
+    LegacyLittleEndianChecksumWithoutSummaryTerminators,
+}
+
 pub fn parse_key_index(
     source: &FileSource,
     header: &Header,
@@ -49,18 +55,18 @@ pub fn parse_key_index(
     let _header_memory = memory.reserve(44, "keyword section header")?;
     let mut raw_header =
         source.read_exact_at(keyword_section_offset, 44, "keyword section header")?;
-    let checksum = u32::from_be_bytes([
+    let checksum_bytes = [
         raw_header[40],
         raw_header[41],
         raw_header[42],
         raw_header[43],
-    ]);
+    ];
 
     if header.encryption_mode().has_keyword_header() {
         let passcode = options.passcode.as_ref().ok_or(Error::MissingPasscode)?;
         decrypt_keyword_header_block(&mut raw_header[..40], passcode)?;
     }
-    crate::format::checksum::verify_adler32("keyword section header", &raw_header[..40], checksum)?;
+    let layout = detect_keyword_index_layout(&raw_header[..40], checksum_bytes)?;
 
     let mut cursor = Cursor::new(&raw_header[..40]);
     let num_blocks = cursor.read_u64_be("keyword num_blocks")?;
@@ -89,6 +95,7 @@ pub fn parse_key_index(
         num_entries,
         key_index_decomp_len,
         key_encoding,
+        layout,
         &options.limits,
     )?;
 
@@ -152,6 +159,7 @@ pub fn parse_key_index(
         &decoded,
         num_blocks,
         key_encoding,
+        layout,
         key_blocks_offset,
         &options.limits,
     )?;
@@ -193,11 +201,34 @@ pub fn parse_key_index(
     })
 }
 
+fn detect_keyword_index_layout(
+    header: &[u8],
+    checksum_bytes: [u8; 4],
+) -> Result<KeywordIndexLayout> {
+    let actual = crate::format::checksum::adler32(header);
+    let canonical_checksum = u32::from_be_bytes(checksum_bytes);
+    if actual == canonical_checksum {
+        return Ok(KeywordIndexLayout::Canonical);
+    }
+
+    let legacy_checksum = u32::from_le_bytes(checksum_bytes);
+    if actual == legacy_checksum {
+        return Ok(KeywordIndexLayout::LegacyLittleEndianChecksumWithoutSummaryTerminators);
+    }
+
+    Err(Error::ChecksumMismatch {
+        context: "keyword section header",
+        expected: canonical_checksum,
+        actual,
+    })
+}
+
 fn validate_keyword_header_counts(
     num_blocks: u64,
     num_entries: u64,
     key_index_decomp_len: u64,
     encoding: TextEncoding,
+    layout: KeywordIndexLayout,
     limits: &Limits,
 ) -> Result<usize> {
     if num_blocks > num_entries {
@@ -206,7 +237,7 @@ fn validate_keyword_header_counts(
         )));
     }
     let minimum_index_len = num_blocks
-        .checked_mul(minimum_keyword_index_entry_bytes(encoding)?)
+        .checked_mul(minimum_keyword_index_entry_bytes(encoding, layout)?)
         .ok_or(Error::InvalidFormat(
             "minimum keyword index length overflow",
         ))?;
@@ -228,13 +259,20 @@ fn validate_keyword_header_counts(
     Ok(num_blocks)
 }
 
-fn minimum_keyword_index_entry_bytes(encoding: TextEncoding) -> Result<u64> {
+fn minimum_keyword_index_entry_bytes(
+    encoding: TextEncoding,
+    layout: KeywordIndexLayout,
+) -> Result<u64> {
     let unit_size = u64::try_from(encoding.unit_size())
         .map_err(|_| Error::InvalidFormat("encoding unit size exceeds u64"))?;
+    let summary_terminators = match layout {
+        KeywordIndexLayout::Canonical => 2,
+        KeywordIndexLayout::LegacyLittleEndianChecksumWithoutSummaryTerminators => 0,
+    };
     28u64
         .checked_add(
             unit_size
-                .checked_mul(2)
+                .checked_mul(summary_terminators)
                 .ok_or(Error::InvalidFormat("keyword index entry size overflow"))?,
         )
         .ok_or(Error::InvalidFormat("keyword index entry size overflow"))
@@ -244,12 +282,13 @@ fn parse_keyword_index_entries(
     bytes: &[u8],
     num_blocks: usize,
     encoding: TextEncoding,
+    layout: KeywordIndexLayout,
     key_blocks_offset: u64,
     limits: &Limits,
 ) -> Result<Vec<KeyBlockInfo>> {
     let minimum_len = num_blocks
         .checked_mul(checked_usize(
-            minimum_keyword_index_entry_bytes(encoding)?,
+            minimum_keyword_index_entry_bytes(encoding, layout)?,
             "minimum keyword index entry length",
         )?)
         .ok_or(Error::InvalidFormat(
@@ -279,12 +318,14 @@ fn parse_keyword_index_entries(
                 ))?;
         let first_bytes = cursor.read_bytes(first_len, "keyword block first key")?;
         let first_key = encoding.decode(first_bytes, "keyword block first key")?;
-        let terminator =
-            cursor.read_bytes(encoding.unit_size(), "keyword block first key terminator")?;
-        if terminator.iter().any(|byte| *byte != 0) {
-            return Err(Error::InvalidFormat(
-                "invalid keyword block first-key terminator",
-            ));
+        if layout == KeywordIndexLayout::Canonical {
+            let terminator =
+                cursor.read_bytes(encoding.unit_size(), "keyword block first key terminator")?;
+            if terminator.iter().any(|byte| *byte != 0) {
+                return Err(Error::InvalidFormat(
+                    "invalid keyword block first-key terminator",
+                ));
+            }
         }
 
         let last_units = usize::from(cursor.read_u16_be("keyword block last key size")?);
@@ -295,12 +336,14 @@ fn parse_keyword_index_entries(
             ))?;
         let last_bytes = cursor.read_bytes(last_len, "keyword block last key")?;
         let last_key = encoding.decode(last_bytes, "keyword block last key")?;
-        let terminator =
-            cursor.read_bytes(encoding.unit_size(), "keyword block last key terminator")?;
-        if terminator.iter().any(|byte| *byte != 0) {
-            return Err(Error::InvalidFormat(
-                "invalid keyword block last-key terminator",
-            ));
+        if layout == KeywordIndexLayout::Canonical {
+            let terminator =
+                cursor.read_bytes(encoding.unit_size(), "keyword block last key terminator")?;
+            if terminator.iter().any(|byte| *byte != 0) {
+                return Err(Error::InvalidFormat(
+                    "invalid keyword block last-key terminator",
+                ));
+            }
         }
 
         let comp_size = cursor.read_u64_be("keyword block compressed size")?;
@@ -393,9 +436,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn canonical_layout_wins_when_checksum_byte_order_is_ambiguous() {
+        let header = [
+            0x33, 0xcc, 0xfe, 0xfe, 0x7a, 0xb6, 0xef, 0xf1, 0xf7, 0x3d, 0x49, 0x33, 0xfe, 0x9d,
+            0xcc, 0xde, 0x76, 0x81, 0x21, 0xb5, 0x05, 0x43, 0x33, 0xb7, 0x29, 0x65, 0x5c, 0xf8,
+            0xc0, 0x1f, 0xbc, 0x66, 0x17, 0xe3, 0x48, 0x9f, 0xd1, 0x63, 0x5b, 0x91,
+        ];
+        let checksum_bytes = crate::format::checksum::adler32(&header).to_be_bytes();
+        assert_eq!(checksum_bytes, [0xe4, 0x15, 0x15, 0xe4]);
+        assert_eq!(
+            detect_keyword_index_layout(&header, checksum_bytes).unwrap(),
+            KeywordIndexLayout::Canonical
+        );
+    }
+
+    #[test]
     fn rejects_block_count_that_cannot_fit_the_index() {
-        let error = validate_keyword_header_counts(2, 2, 1, TextEncoding::Utf8, &Limits::new())
-            .unwrap_err();
+        let error = validate_keyword_header_counts(
+            2,
+            2,
+            1,
+            TextEncoding::Utf8,
+            KeywordIndexLayout::Canonical,
+            &Limits::new(),
+        )
+        .unwrap_err();
         assert!(matches!(error, Error::InvalidData(_)));
     }
 

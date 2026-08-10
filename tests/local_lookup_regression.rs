@@ -1,7 +1,11 @@
 #[path = "support/corpus.rs"]
 mod corpus;
 
+use std::env;
+use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
+use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use mdictlib::{KeyEntry, MatchBasis, MddFile, MdxFile};
 
@@ -9,6 +13,8 @@ use corpus::{Corpus, CorpusKind, Sha256, hex};
 
 const RELEASE_MANIFEST_SHA256: &str =
     "f4a61bb746601fae3c46d0cf80f2c49426be8c3cd5414a42d2b0942a3f0672f9";
+const AUDIT_OUTPUT_ENV: &str = "MDICT_CORPUS_AUDIT_TSV";
+const AUDIT_HEADER: &str = "path\tkind\tentries\tkey_sha256\tpayload_sha256\n";
 
 struct LogicalBaseline {
     kind: CorpusKind,
@@ -63,30 +69,132 @@ const RELEASE_LOGICAL_BASELINES: &[LogicalBaseline] = &[
 ];
 
 #[test]
+fn audit_output_is_installed_as_one_complete_file() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let root = env::temp_dir().join(format!(
+        "mdictlib-logical-audit-{}-{nonce}",
+        std::process::id()
+    ));
+    fs::create_dir(&root).unwrap();
+    let destination = root.join("audit.tsv");
+    let contents = b"path\tkind\tentries\tkey_sha256\tpayload_sha256\n";
+
+    write_audit_atomically(&destination, contents).unwrap();
+    assert_eq!(fs::read(&destination).unwrap(), contents);
+    assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 #[ignore = "requires the manifest-verified private corpus selected by MDICT_CORPUS_DIR"]
 fn every_physical_key_round_trips_by_ordinal_and_raw_lookup() {
     let corpus = Corpus::load_from_env_or_panic();
     let release_baselines = (hex(corpus.manifest_sha256()) == RELEASE_MANIFEST_SHA256)
         .then_some(RELEASE_LOGICAL_BASELINES);
 
+    print!("{AUDIT_HEADER}");
+    let mut audit = String::from(AUDIT_HEADER);
     for (index, entry) in corpus.entries().iter().enumerate() {
         let path = corpus.path(entry);
         let (key_sha256, payload_sha256) = match entry.kind() {
             CorpusKind::Mdx => audit_mdx(&path, entry.expected_entries()),
             CorpusKind::Mdd => audit_mdd(&path, entry.expected_entries()),
         };
-        if let Some(baselines) = release_baselines {
+        let row = format!(
+            "{}\t{}\t{}\t{}\t{}\n",
+            entry.manifest_path(),
+            entry.kind().as_str(),
+            entry.expected_entries(),
+            hex(&key_sha256),
+            hex(&payload_sha256)
+        );
+        print!("{row}");
+        audit.push_str(&row);
+        let release_baseline = release_baselines.map(|baselines| {
             let baseline = baselines
                 .get(index)
                 .unwrap_or_else(|| panic!("release baseline is missing corpus row {index}"));
             assert_eq!(baseline.kind, entry.kind());
             assert_eq!(baseline.entries, entry.expected_entries());
-            assert_eq!(hex(&key_sha256), baseline.key_sha256);
-            assert_eq!(hex(&payload_sha256), baseline.payload_sha256);
-        }
+            baseline
+        });
+        assert_logical_digest(
+            "key_sha256",
+            &key_sha256,
+            entry.expected_key_sha256(),
+            release_baseline.map(|baseline| baseline.key_sha256),
+            entry.relative_path(),
+        );
+        assert_logical_digest(
+            "payload_sha256",
+            &payload_sha256,
+            entry.expected_payload_sha256(),
+            release_baseline.map(|baseline| baseline.payload_sha256),
+            entry.relative_path(),
+        );
     }
     if let Some(baselines) = release_baselines {
         assert_eq!(baselines.len(), corpus.entries().len());
+    }
+    if let Some(output) = env::var_os(AUDIT_OUTPUT_ENV) {
+        write_audit_atomically(Path::new(&output), audit.as_bytes()).unwrap_or_else(|error| {
+            panic!(
+                "failed to write {AUDIT_OUTPUT_ENV}={} atomically: {error}",
+                Path::new(&output).display()
+            )
+        });
+    }
+}
+
+fn write_audit_atomically(destination: &Path, bytes: &[u8]) -> io::Result<()> {
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("mdictlib-corpus-audit.tsv");
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let temporary = parent.join(format!(".{file_name}.tmp-{}-{nonce}", std::process::id()));
+
+    let result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temporary, destination)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn assert_logical_digest(
+    field: &str,
+    actual: &[u8; 32],
+    manifest_expected: Option<&[u8; 32]>,
+    release_fallback: Option<&str>,
+    relative_path: &std::path::Path,
+) {
+    let expected = manifest_expected
+        .map(|expected| hex(expected))
+        .or_else(|| release_fallback.map(str::to_owned));
+    if let Some(expected) = expected {
+        assert_eq!(
+            hex(actual),
+            expected,
+            "{field} differs from the corpus baseline for {}",
+            relative_path.display()
+        );
     }
 }
 

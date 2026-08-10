@@ -10,7 +10,23 @@ use std::path::{Component, Path, PathBuf};
 pub const CORPUS_ENV: &str = "MDICT_CORPUS_DIR";
 pub const MANIFEST_NAME: &str = "mdictlib-corpus.tsv";
 
-const MANIFEST_HEADER: &str = "path\tkind\tbytes\tsha256\tentries";
+const MANIFEST_HEADER_V1: &str = "path\tkind\tbytes\tsha256\tentries";
+const MANIFEST_HEADER_V2: &str = "path\tkind\tbytes\tsha256\tentries\tkey_sha256\tpayload_sha256";
+
+#[derive(Debug, Clone, Copy)]
+enum ManifestVersion {
+    V1,
+    V2,
+}
+
+impl ManifestVersion {
+    const fn field_count(self) -> usize {
+        match self {
+            Self::V1 => 5,
+            Self::V2 => 7,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CorpusKind {
@@ -38,10 +54,13 @@ impl CorpusKind {
 #[derive(Debug, Clone)]
 pub struct CorpusEntry {
     relative_path: PathBuf,
+    canonical_path: PathBuf,
     kind: CorpusKind,
     expected_bytes: u64,
     expected_sha256: [u8; 32],
     expected_entries: u64,
+    expected_key_sha256: Option<[u8; 32]>,
+    expected_payload_sha256: Option<[u8; 32]>,
 }
 
 impl CorpusEntry {
@@ -74,6 +93,14 @@ impl CorpusEntry {
 
     pub fn expected_sha256_hex(&self) -> String {
         hex(&self.expected_sha256)
+    }
+
+    pub fn expected_key_sha256(&self) -> Option<&[u8; 32]> {
+        self.expected_key_sha256.as_ref()
+    }
+
+    pub fn expected_payload_sha256(&self) -> Option<&[u8; 32]> {
+        self.expected_payload_sha256.as_ref()
     }
 }
 
@@ -120,7 +147,7 @@ impl Corpus {
         manifest_digest.update(manifest.as_bytes());
         let manifest_sha256 = manifest_digest.finish();
 
-        let mut saw_header = false;
+        let mut manifest_version = None;
         let mut entries = Vec::new();
         let mut paths = HashSet::new();
 
@@ -130,22 +157,26 @@ impl Corpus {
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            if !saw_header {
-                if line != MANIFEST_HEADER {
-                    return Err(format!(
-                        "{}:{line_number}: expected manifest header {MANIFEST_HEADER:?}",
-                        manifest_path.display()
-                    ));
-                }
-                saw_header = true;
+            let Some(version) = manifest_version else {
+                manifest_version = Some(match line {
+                    MANIFEST_HEADER_V1 => ManifestVersion::V1,
+                    MANIFEST_HEADER_V2 => ManifestVersion::V2,
+                    _ => {
+                        return Err(format!(
+                            "{}:{line_number}: expected manifest header {MANIFEST_HEADER_V1:?} or {MANIFEST_HEADER_V2:?}",
+                            manifest_path.display()
+                        ));
+                    }
+                });
                 continue;
-            }
+            };
 
             let fields = line.split('\t').collect::<Vec<_>>();
-            if fields.len() != 5 {
+            if fields.len() != version.field_count() {
                 return Err(format!(
-                    "{}:{line_number}: expected five tab-separated fields, got {}",
+                    "{}:{line_number}: expected {} tab-separated fields, got {}",
                     manifest_path.display(),
+                    version.field_count(),
                     fields.len()
                 ));
             }
@@ -166,21 +197,35 @@ impl Corpus {
                 .map_err(|error| format!("{}:{line_number}: {error}", manifest_path.display()))?;
             let expected_bytes = parse_u64(fields[2], "bytes")
                 .map_err(|error| format!("{}:{line_number}: {error}", manifest_path.display()))?;
-            let expected_sha256 = parse_sha256(fields[3])
+            let expected_sha256 = parse_sha256(fields[3], "sha256")
                 .map_err(|error| format!("{}:{line_number}: {error}", manifest_path.display()))?;
             let expected_entries = parse_u64(fields[4], "entries")
                 .map_err(|error| format!("{}:{line_number}: {error}", manifest_path.display()))?;
+            let (expected_key_sha256, expected_payload_sha256) = match version {
+                ManifestVersion::V1 => (None, None),
+                ManifestVersion::V2 => (
+                    parse_optional_sha256(fields[5], "key_sha256").map_err(|error| {
+                        format!("{}:{line_number}: {error}", manifest_path.display())
+                    })?,
+                    parse_optional_sha256(fields[6], "payload_sha256").map_err(|error| {
+                        format!("{}:{line_number}: {error}", manifest_path.display())
+                    })?,
+                ),
+            };
 
             entries.push(CorpusEntry {
                 relative_path,
+                canonical_path: PathBuf::new(),
                 kind,
                 expected_bytes,
                 expected_sha256,
                 expected_entries,
+                expected_key_sha256,
+                expected_payload_sha256,
             });
         }
 
-        if !saw_header {
+        if manifest_version.is_none() {
             return Err(format!(
                 "corpus manifest {} has no header",
                 manifest_path.display()
@@ -194,7 +239,7 @@ impl Corpus {
         }
 
         entries.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
-        let corpus = Self {
+        let mut corpus = Self {
             root: canonical_root,
             entries,
             manifest_sha256,
@@ -220,12 +265,12 @@ impl Corpus {
     }
 
     pub fn path(&self, entry: &CorpusEntry) -> PathBuf {
-        self.root.join(&entry.relative_path)
+        entry.canonical_path.clone()
     }
 
-    fn verify_files(&self) -> Result<(), String> {
-        for entry in &self.entries {
-            let path = self.path(entry);
+    fn verify_files(&mut self) -> Result<(), String> {
+        for entry in &mut self.entries {
+            let path = self.root.join(&entry.relative_path);
             let canonical_path = path.canonicalize().map_err(|error| {
                 format!(
                     "manifest entry {} is unavailable: {error}",
@@ -274,6 +319,7 @@ impl Corpus {
                     entry.expected_sha256_hex()
                 ));
             }
+            entry.canonical_path = canonical_path;
         }
         Ok(())
     }
@@ -282,7 +328,8 @@ impl Corpus {
 pub fn setup_instructions() -> String {
     format!(
         "Set {CORPUS_ENV} to an authorized corpus directory containing {MANIFEST_NAME}. \
-The manifest must use the tab-separated header `{MANIFEST_HEADER}` and one \
+The manifest must use the tab-separated v1 header `{MANIFEST_HEADER_V1}` or \
+v2 header `{MANIFEST_HEADER_V2}` and one \
 row per .mdx/.mdd file. See tests/corpus-manifest.example.tsv."
     )
 }
@@ -340,10 +387,18 @@ fn parse_u64(value: &str, field: &str) -> Result<u64, String> {
         .map_err(|_| format!("{field} must be an unsigned decimal integer, got {value:?}"))
 }
 
-fn parse_sha256(value: &str) -> Result<[u8; 32], String> {
+fn parse_optional_sha256(value: &str, field: &str) -> Result<Option<[u8; 32]>, String> {
+    if value.is_empty() {
+        Ok(None)
+    } else {
+        parse_sha256(value, field).map(Some)
+    }
+}
+
+fn parse_sha256(value: &str, field: &str) -> Result<[u8; 32], String> {
     if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(format!(
-            "sha256 must contain exactly 64 hexadecimal digits, got {value:?}"
+            "{field} must contain exactly 64 hexadecimal digits, got {value:?}"
         ));
     }
 

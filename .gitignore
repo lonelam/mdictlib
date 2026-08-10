@@ -1,5 +1,16 @@
 target/
 
+# Downloaded dictionary corpora are local, checksum-verified test inputs. The
+# public repository tracks only their catalog, provenance, and acquisition
+# tooling; Git LFS is intentionally not used for these bytes.
+.corpus/
+
+# Prevent dictionary payloads from being committed outside the managed local
+# corpus root by accident. Explicitly redistributable synthetic fixtures can
+# still be force-added after review.
+*.[mM][dD][xX]
+*.[mM][dD][dD]
+
 /tmp*
 
 draft/

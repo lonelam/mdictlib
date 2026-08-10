@@ -4,6 +4,46 @@ All notable changes are recorded here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Accepted a narrowly identified legacy v2 keyword-index layout only when the
+  canonical big-endian keyword-header ADLER32 fails and the exact little-endian
+  checksum matches; this layout omits summary terminators while retaining all
+  count, size, checksum, complete-consumption, decoding, and boundary checks.
+- Changed exhaustive duplicate auditing to validate each complete duplicate
+  group once and use logarithmic membership checks, preventing repeated
+  whole-group scans for large duplicate sets. The audit example now has five
+  active unit tests.
+
+### Validation And Tooling
+
+- Added a deterministic, metadata-only inventory workflow for direct MDict
+  files, including an aggregate in-flight page-body cap, with a reviewed
+  catalog boundary and bounded acquisition into an ignored local corpus cache.
+- Bound reviewed selections and complete acquisition outcomes to the exact
+  inventory bytes and selected artifact denominator, and made each promoted
+  lock/outcome report an independently verifiable tracked pair; hardened
+  downloads to public, credential/query-free HTTPS targets with same-origin
+  redirects, inactivity timeouts, and absolute deadlines.
+- Split binary-identity-pinned metadata-open/count bootstrap observation from
+  payload validation and added timeout-bounded, one-artifact-per-process
+  exhaustive audits with reverified executable identity and atomic
+  catalog/denominator/runner-bound outcome reports. Logical-baseline promotion
+  now requires the exact complete-success outcome ledger and audit TSV, and an
+  explicit chain verifier re-derives the logical lock from those inputs.
+- Added version 2 corpus manifests with optional exact logical key and payload
+  SHA-256 baselines while retaining version 1 manifest support.
+- Documented corpus provenance, redistribution review, inventory outcome
+  reporting, and the split between CI tooling checks and manual full-corpus
+  validation.
+- Acquired all 1,254 reviewed direct MDX files (40,084,630,153 bytes) into the
+  ignored local cache with no acquisition errors; tracked only the verified
+  792-file bootstrap lock and the complete 1,254-row acquisition outcomes.
+- Recorded the exact 792-artifact exhaustive ledger: 757 whole-artifact passes
+  covering 78,368,836 entries and 35 first-error failures. No logical TSV or
+  logical-baseline lock was produced because the run was not wholly successful;
+  the results remain self-observed regression evidence.
+
 ## [0.1.0] - 2026-08-10
 
 ### Added

@@ -40,6 +40,12 @@ jobs:
         run: rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy
       - name: Install pinned fuzz toolchain
         run: rustup toolchain install nightly-2026-08-09 --profile minimal
+      - name: Install Node.js for corpus tooling tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test corpus inventory and acquisition tooling
+        run: node --test scripts/corpus/*.test.mjs scripts/corpus/test/*.test.mjs
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Lint every target and feature

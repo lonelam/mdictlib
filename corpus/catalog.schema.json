@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/lonelam/mdictlib/blob/master/corpus/catalog.schema.json",
+  "title": "mdictlib reviewed corpus lock",
+  "description": "A hash-pinned local validation corpus. Discovery output is not a lock: every approved entry requires explicit authorization for private local testing; redistribution permission is reviewed separately.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "catalog", "entries"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "catalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "scope"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "scope": { "type": "string", "minLength": 1, "pattern": "\\S" }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "$defs": {
+    "nullableNonemptyString": {
+      "anyOf": [
+        { "type": "string", "minLength": 1, "pattern": "\\S" },
+        { "type": "null" }
+      ]
+    },
+    "nullableSha256": {
+      "anyOf": [
+        { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        { "type": "null" }
+      ]
+    },
+    "observer": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["binaryBytes", "binarySha256", "mode", "timeoutMs", "tool", "version"],
+          "properties": {
+            "binaryBytes": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+            "binarySha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "mode": { "const": "metadata-open-and-count" },
+            "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+            "tool": { "type": "string", "minLength": 1, "pattern": "\\S" },
+            "version": { "type": "string", "minLength": 1, "pattern": "\\S" }
+          }
+        },
+        { "type": "null" }
+      ]
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "testingAllowed",
+        "redistributionAllowed",
+        "license",
+        "licenseUrl",
+        "reviewedBy",
+        "reviewedAt",
+        "notes"
+      ],
+      "properties": {
+        "status": { "enum": ["approved", "rejected", "pending"] },
+        "testingAllowed": { "type": "boolean" },
+        "redistributionAllowed": { "type": "boolean" },
+        "license": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "licenseUrl": {
+          "anyOf": [
+            { "type": "string", "format": "uri", "pattern": "^https?://" },
+            { "type": "null" }
+          ]
+        },
+        "reviewedBy": { "$ref": "#/$defs/nullableNonemptyString" },
+        "reviewedAt": {
+          "anyOf": [
+            { "type": "string", "format": "date-time" },
+            { "type": "null" }
+          ]
+        },
+        "notes": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "approved" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "testingAllowed": { "const": true },
+              "reviewedBy": { "type": "string" },
+              "reviewedAt": { "type": "string" },
+              "notes": { "type": "string", "minLength": 1, "pattern": "\\S" }
+            }
+          },
+          "else": { "properties": { "testingAllowed": { "const": false } } }
+        },
+        {
+          "if": { "properties": { "redistributionAllowed": { "const": true } }, "required": ["redistributionAllowed"] },
+          "then": {
+            "properties": {
+              "license": {
+                "type": "string",
+                "pattern": "^(?!\\s*(?:[Uu][Nn][Kk][Nn][Oo][Ww][Nn]|[Uu][Nn][Vv][Ee][Rr][Ii][Ff][Ii][Ee][Dd])\\s*$).*\\S.*$"
+              },
+              "licenseUrl": { "type": "string" }
+            }
+          }
+        }
+      ]
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "sourcePath",
+        "url",
+        "resolvedUrl",
+        "path",
+        "bytes",
+        "sha256",
+        "expectedEntries",
+        "entryCountBasis",
+        "keySha256",
+        "payloadSha256",
+        "logicalDigestBasis",
+        "logicalObservation",
+        "observedEntries",
+        "observation",
+        "observationError",
+        "observer"
+      ],
+      "properties": {
+        "kind": { "enum": ["mdx", "mdd"] },
+        "sourcePath": { "type": "string", "minLength": 1, "pattern": "^(?=.*\\S)[^\\t\\r\\n\\u0000]+$" },
+        "url": { "type": "string", "format": "uri", "pattern": "^[Hh][Tt][Tt][Pp][Ss]://[^?#]+$" },
+        "resolvedUrl": { "type": "string", "format": "uri", "pattern": "^[Hh][Tt][Tt][Pp][Ss]://[^?#]+$" },
+        "path": {
+          "type": "string",
+          "minLength": 5,
+          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)[^\\t\\r\\n]+\\.(?:[Mm][Dd][Xx]|[Mm][Dd][Dd])$"
+        },
+        "bytes": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "expectedEntries": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "entryCountBasis": { "enum": ["independent", "publisher", "mdictlib-self-observed"] },
+        "keySha256": { "$ref": "#/$defs/nullableSha256" },
+        "payloadSha256": { "$ref": "#/$defs/nullableSha256" },
+        "logicalDigestBasis": {
+          "anyOf": [
+            { "enum": ["independent", "mdictlib-self-observed"] },
+            { "type": "null" }
+          ]
+        },
+        "logicalObservation": { "$ref": "#/$defs/nullableNonemptyString" },
+        "observedEntries": {
+          "anyOf": [
+            { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+            { "type": "null" }
+          ]
+        },
+        "observation": { "$ref": "#/$defs/nullableNonemptyString" },
+        "observationError": { "$ref": "#/$defs/nullableNonemptyString" },
+        "observer": { "$ref": "#/$defs/observer" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "entryCountBasis": { "const": "mdictlib-self-observed" } }, "required": ["entryCountBasis"] },
+          "then": {
+            "properties": {
+              "observation": { "type": "string", "minLength": 1 },
+              "observationError": { "type": "null" },
+              "observedEntries": { "type": "integer" },
+              "observer": { "type": "object" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "keySha256": { "type": "string" } }, "required": ["keySha256"] },
+          "then": {
+            "properties": {
+              "payloadSha256": { "type": "string" },
+              "logicalDigestBasis": { "type": "string" },
+              "logicalObservation": { "type": "string" }
+            }
+          },
+          "else": {
+            "properties": {
+              "payloadSha256": { "type": "null" },
+              "logicalDigestBasis": { "type": "null" },
+              "logicalObservation": { "type": "null" }
+            }
+          }
+        }
+      ]
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "infoUrl", "review", "artifacts"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
+        },
+        "title": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "infoUrl": { "type": "string", "format": "uri", "pattern": "^https?://" },
+        "review": { "$ref": "#/$defs/review" },
+        "artifacts": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/artifact" }
+        }
+      }
+    }
+  }
+}

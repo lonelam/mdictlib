@@ -7,6 +7,21 @@ use mdictlib::{Error, KeyOrdinal, MddFile, MdxFile};
 use support::FixtureBuilder;
 
 #[test]
+fn unsupported_major_version_wins_over_its_legacy_encoding_label() {
+    let fixture = FixtureBuilder::mdx([("legacy", "record")])
+        .engine_versions("1.2", "1.2")
+        .encoding_label("ISO8859-1")
+        .build();
+    let dictionary_file = fixture.write("legacy-version-before-encoding");
+    assert!(matches!(
+        MdxFile::open(dictionary_file.path()),
+        Err(Error::Unsupported(
+            "MDict format major version other than 2"
+        ))
+    ));
+}
+
+#[test]
 fn valid_empty_mdx_and_mdd_open_without_synthetic_blocks() {
     let mdx_fixture = FixtureBuilder::mdx(std::iter::empty::<(&str, &str)>()).build();
     let mdx_file = mdx_fixture.write("empty-mdx");

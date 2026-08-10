@@ -207,6 +207,11 @@ impl MdictFile {
         let memory = Arc::new(MemoryBudget::new(limits.working_memory_bytes));
         let header_section = parse_header(&source, kind, &limits, &memory)?;
         let header_memory = memory.reserve(header_section.retained_bytes, "parsed header")?;
+        if !header_section.header.is_v2() {
+            return Err(Error::Unsupported(
+                "MDict format major version other than 2",
+            ));
+        }
         let key_encoding = TextEncoding::for_container(kind, &header_section.header)?;
         let key_index = parse_key_index(
             &source,

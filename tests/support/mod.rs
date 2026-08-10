@@ -13,6 +13,10 @@ pub fn independent_ripemd128(bytes: &[u8]) -> [u8; 16] {
     crypto::ripemd128(bytes)
 }
 
+pub fn independent_adler32(bytes: &[u8]) -> u32 {
+    adler32(bytes)
+}
+
 static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,6 +89,12 @@ struct FixtureEntry {
     record: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FixtureKeywordIndexLayout {
+    Canonical,
+    LegacyLittleEndianChecksumWithoutSummaryTerminators,
+}
+
 /// Independent, test-only builder for the MDict v2 layout consumed by the
 /// public reader. It does not call the library's parser, checksum, crypto, or
 /// block-codec implementation; standard text/zlib crates are invoked directly.
@@ -92,6 +102,9 @@ struct FixtureEntry {
 pub struct FixtureBuilder {
     kind: FixtureKind,
     encoding: FixtureEncoding,
+    encoding_label: Option<String>,
+    generated_engine_version: String,
+    required_engine_version: String,
     entries: Vec<FixtureEntry>,
     key_block_counts: Vec<usize>,
     record_block_sizes: Option<Vec<usize>>,
@@ -105,6 +118,7 @@ pub struct FixtureBuilder {
     key_index_compression: FixtureCompression,
     key_block_compression: FixtureCompression,
     record_block_compression: FixtureCompression,
+    keyword_index_layout: FixtureKeywordIndexLayout,
     encrypt_keyword_index: bool,
     keyword_header_passcode: Option<FixturePasscode>,
 }
@@ -144,6 +158,9 @@ impl FixtureBuilder {
                 FixtureKind::Mdx => FixtureEncoding::Utf8,
                 FixtureKind::Mdd => FixtureEncoding::Utf16Le,
             },
+            encoding_label: None,
+            generated_engine_version: "2.0".to_owned(),
+            required_engine_version: "2.0".to_owned(),
             entries,
             key_block_counts: if entry_count == 0 {
                 Vec::new()
@@ -161,6 +178,7 @@ impl FixtureBuilder {
             key_index_compression: FixtureCompression::None,
             key_block_compression: FixtureCompression::None,
             record_block_compression: FixtureCompression::None,
+            keyword_index_layout: FixtureKeywordIndexLayout::Canonical,
             encrypt_keyword_index: false,
             keyword_header_passcode: None,
         }
@@ -169,6 +187,22 @@ impl FixtureBuilder {
     pub fn encoding(mut self, encoding: FixtureEncoding) -> Self {
         assert_eq!(self.kind, FixtureKind::Mdx, "MDD keys are always UTF-16LE");
         self.encoding = encoding;
+        self
+    }
+
+    pub fn encoding_label(mut self, label: impl Into<String>) -> Self {
+        assert_eq!(self.kind, FixtureKind::Mdx, "MDD keys are always UTF-16LE");
+        self.encoding_label = Some(label.into());
+        self
+    }
+
+    pub fn engine_versions(
+        mut self,
+        generated: impl Into<String>,
+        required: impl Into<String>,
+    ) -> Self {
+        self.generated_engine_version = generated.into();
+        self.required_engine_version = required.into();
         self
     }
 
@@ -193,6 +227,12 @@ impl FixtureBuilder {
 
     pub fn encrypt_keyword_index(mut self) -> Self {
         self.encrypt_keyword_index = true;
+        self
+    }
+
+    pub fn legacy_keyword_index_layout(mut self) -> Self {
+        self.keyword_index_layout =
+            FixtureKeywordIndexLayout::LegacyLittleEndianChecksumWithoutSummaryTerminators;
         self
     }
 
@@ -360,8 +400,9 @@ impl FixtureBuilder {
             .zip(key_blocks.iter())
         {
             put_u64_be(&mut key_index_payload, u64::try_from(entry_count).unwrap());
-            put_summary(&mut key_index_payload, self.encoding, first);
-            put_summary(&mut key_index_payload, self.encoding, last);
+            let terminated = self.keyword_index_layout == FixtureKeywordIndexLayout::Canonical;
+            put_summary(&mut key_index_payload, self.encoding, first, terminated);
+            put_summary(&mut key_index_payload, self.encoding, last, terminated);
             put_u64_be(&mut key_index_payload, u64::try_from(block.len()).unwrap());
             put_u64_be(
                 &mut key_index_payload,
@@ -381,10 +422,15 @@ impl FixtureBuilder {
         let header_xml = header_xml(
             self.kind,
             self.encoding,
-            encryption_bits,
-            &self.key_case_attribute,
-            &self.strip_key_attribute,
-            &self.extra_header_attributes,
+            HeaderXmlOptions {
+                encoding_label: self.encoding_label.as_deref(),
+                generated_engine_version: &self.generated_engine_version,
+                required_engine_version: &self.required_engine_version,
+                encryption_bits,
+                key_case_attribute: &self.key_case_attribute,
+                strip_key_attribute: &self.strip_key_attribute,
+                extra_attributes: &self.extra_header_attributes,
+            },
         );
         let header_xml_bytes = utf16le(&header_xml);
 
@@ -427,7 +473,12 @@ impl FixtureBuilder {
             );
         }
         bytes.extend_from_slice(&keyword_header_payload);
-        put_u32_be(&mut bytes, keyword_header_checksum);
+        match self.keyword_index_layout {
+            FixtureKeywordIndexLayout::Canonical => put_u32_be(&mut bytes, keyword_header_checksum),
+            FixtureKeywordIndexLayout::LegacyLittleEndianChecksumWithoutSummaryTerminators => {
+                put_u32_le(&mut bytes, keyword_header_checksum)
+            }
+        }
 
         let key_index_start = bytes.len();
         bytes.extend_from_slice(&key_index_block);
@@ -469,6 +520,8 @@ impl FixtureBuilder {
             layout: FixtureLayout {
                 header_checksum_offset,
                 keyword_header_offset,
+                legacy_keyword_index_layout: self.keyword_index_layout
+                    == FixtureKeywordIndexLayout::LegacyLittleEndianChecksumWithoutSummaryTerminators,
                 key_index_block: key_index_range,
                 key_blocks: key_block_ranges,
                 record_header_offset,
@@ -483,6 +536,7 @@ impl FixtureBuilder {
 pub struct FixtureLayout {
     pub header_checksum_offset: usize,
     pub keyword_header_offset: usize,
+    legacy_keyword_index_layout: bool,
     pub key_index_block: Range<usize>,
     pub key_blocks: Vec<Range<usize>>,
     pub record_header_offset: usize,
@@ -551,7 +605,12 @@ impl BuiltFixture {
     fn refresh_keyword_header_checksum(&mut self) {
         let start = self.layout.keyword_header_offset;
         let checksum = adler32(&self.bytes[start..start + 40]);
-        self.bytes[start + 40..start + 44].copy_from_slice(&checksum.to_be_bytes());
+        let checksum = if self.layout.legacy_keyword_index_layout {
+            checksum.to_le_bytes()
+        } else {
+            checksum.to_be_bytes()
+        };
+        self.bytes[start + 40..start + 44].copy_from_slice(&checksum);
     }
 }
 
@@ -618,27 +677,37 @@ fn split_record_blocks(data: &[u8], sizes: Vec<usize>) -> Vec<Vec<u8>> {
         .collect()
 }
 
+struct HeaderXmlOptions<'a> {
+    encoding_label: Option<&'a str>,
+    generated_engine_version: &'a str,
+    required_engine_version: &'a str,
+    encryption_bits: u8,
+    key_case_attribute: &'a (String, String),
+    strip_key_attribute: &'a (String, String),
+    extra_attributes: &'a [(String, String)],
+}
+
 fn header_xml(
     kind: FixtureKind,
     encoding: FixtureEncoding,
-    encryption_bits: u8,
-    key_case_attribute: &(String, String),
-    strip_key_attribute: &(String, String),
-    extra_attributes: &[(String, String)],
+    options: HeaderXmlOptions<'_>,
 ) -> String {
     let tag = match kind {
         FixtureKind::Mdx => "Dictionary",
         FixtureKind::Mdd => "Library_Data",
     };
     let mut attributes = vec![
-        ("GeneratedByEngineVersion", "2.0"),
-        ("RequiredEngineVersion", "2.0"),
+        ("GeneratedByEngineVersion", options.generated_engine_version),
+        ("RequiredEngineVersion", options.required_engine_version),
     ];
     if kind == FixtureKind::Mdx {
-        attributes.push(("Encoding", encoding.label()));
+        attributes.push((
+            "Encoding",
+            options.encoding_label.unwrap_or_else(|| encoding.label()),
+        ));
     }
-    let encryption_value = encryption_bits.to_string();
-    if encryption_bits != 0 {
+    let encryption_value = options.encryption_bits.to_string();
+    if options.encryption_bits != 0 {
         attributes.push(("Encrypted", &encryption_value));
     }
 
@@ -650,9 +719,9 @@ fn header_xml(
         xml.push_str(value);
         xml.push('"');
     }
-    for (name, value) in [key_case_attribute, strip_key_attribute]
+    for (name, value) in [options.key_case_attribute, options.strip_key_attribute]
         .into_iter()
-        .chain(extra_attributes.iter())
+        .chain(options.extra_attributes.iter())
     {
         xml.push(' ');
         xml.push_str(name);
@@ -672,12 +741,14 @@ fn escape_xml(value: &str) -> String {
         .replace('>', "&gt;")
 }
 
-fn put_summary(output: &mut Vec<u8>, encoding: FixtureEncoding, summary: &str) {
+fn put_summary(output: &mut Vec<u8>, encoding: FixtureEncoding, summary: &str, terminated: bool) {
     let encoded = encode_text(encoding, summary);
     let units = encoded.len() / encoding.unit_size();
     put_u16_be(output, u16::try_from(units).unwrap());
     output.extend_from_slice(&encoded);
-    output.extend(std::iter::repeat_n(0, encoding.unit_size()));
+    if terminated {
+        output.extend(std::iter::repeat_n(0, encoding.unit_size()));
+    }
 }
 
 fn encode_text(encoding: FixtureEncoding, text: &str) -> Vec<u8> {

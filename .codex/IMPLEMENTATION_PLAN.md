@@ -16,7 +16,11 @@ Evidence rules:
 
 - the checked-in source and executable tests are authoritative;
 - `draft/` supplied audit observations and test targets, not importable code;
-- private corpus bytes are never committed;
+- dictionary corpus bytes are never committed to this source repository,
+  including through Git LFS; even separately redistributable assets require an
+  explicit artifact-hosting decision;
+- discovery metadata is a candidate input until a human review records source,
+  authorization, and immutable acquisition facts;
 - corpus claims must name a manifest digest, host/toolchain, and exact command;
 - performance numbers are baselines on the measured host, not universal SLAs.
 
@@ -40,6 +44,14 @@ Supported text encodings are UTF-8, UTF-16LE, GBK/GB2312, GB18030, and Big5.
 Supported block compression is none and zlib, plus LZO with the `lzo` feature.
 Keyword-index encryption and passcode-protected keyword headers are covered by
 independently generated end-to-end fixtures.
+
+One coherent legacy v2 keyword-index layout is also supported internally. The
+parser tries the canonical big-endian keyword-header ADLER32 first and selects
+the legacy layout only when that check fails but the exact little-endian value
+matches; only that layout omits the first/last-summary terminators. Count and
+size sums, decoded-summary validity, complete index consumption, key-block
+checksums, and decoded boundary comparisons remain mandatory. This is a private
+wire-format decision and does not change the public API.
 
 Version 1.x and future-major layouts, writing, HTML/style processing,
 multi-volume discovery, prefix/fuzzy search, resource extraction policy,
@@ -159,6 +171,8 @@ release additionally enforces:
 - exact record-index length and complete section/range validation;
 - key-block count plausibility, checksums, terminators, and creator-compatible
   normalized summary checks;
+- fail-closed canonical/legacy keyword-index layout detection with no general
+  checksum, summary-terminator, or boundary relaxation;
 - nondecreasing record offsets within and across key blocks;
 - lazy descriptor/span validation separate from materialization limits;
 - serialized cache misses and locator construction so successful concurrent
@@ -192,12 +206,144 @@ and five MDD, totaling 3,605,052,185 bytes and 804,572 physical entries. Every
 raw key resolved, every ordinal/payload route agreed, and streaming/materialized
 MDD hashes matched. Private file bytes and identifying paths are excluded.
 
-## 7. Reproducibility And Performance Policy
+## 7. Corpus Provenance And Acquisition Policy
 
-Private corpus tests use `MDICT_CORPUS_DIR` plus `mdictlib-corpus.tsv`. Each row
-declares a normalized relative path, kind, byte count, SHA-256, and entry count.
-Explicit ignored-suite invocation fails with setup instructions if the corpus
-or any fact is absent or wrong.
+The repository uses deliberately separate corpus states:
+
+```text
+candidate inventory
+  -> exact-inventory-bound local-testing selection
+  -> bounded bootstrap in ignored .corpus + draft/outcome report
+  -> reviewed hash lock -> deterministic mdictlib-corpus.tsv -> parser evidence
+```
+
+- Candidate inventories record what a named source exposed at a point in time.
+  Discovery is not authorization, integrity verification, or parser evidence.
+- The selection pins the source inventory byte digest plus the complete
+  selected source-path/type/URL/size set. Bootstrap revalidates that exact
+  inventory denominator and binds the selection digest, entry/artifact counts,
+  advertised bytes, and collision-safe local paths into every draft/outcome
+  transition; promotion rejects missing or extra outcome rows.
+- A reviewed lock records stable source identity, explicit use/redistribution
+  review, expected size and payload digest, source and local collision-safe
+  paths, the bounded metadata-open/count observation plus its exact observer
+  binary identity, and whether entry/logical baselines are independent or
+  `mdictlib`-self-observed.
+- Bootstrap lock/outcome verification rejects logical fields, while a separate
+  exact derivation gate verifies the pre-baseline lock plus exhaustive
+  ledger/TSV against any logical-baseline lock. Both links and their inputs are
+  retained when logical baselines are tracked.
+- Bootstrap and repeat acquisition are opt-in, bounded by per-file/total byte
+  ceilings, inactivity timeouts, and absolute deadlines, and write to the
+  ignored `.corpus/` cache. Production URLs are credential/query-free HTTPS,
+  must resolve exclusively to public addresses, connect through a validated
+  pinned DNS answer, and may redirect only within the reviewed origin; a
+  different origin requires a new review. Git LFS is not a corpus store: it
+  would still redistribute the payloads, consumes metered storage/bandwidth,
+  and cannot hold every observed file under common hosted per-object limits.
+- A local `mdictlib-corpus.tsv` selects acquired bytes for the Rust harness.
+  The harness independently verifies containment, kind, byte count, and file
+  SHA-256 before parsing.
+- Corpus evidence retains every selected row. Unsupported format/version,
+  encrypted/passcode-required, corrupt/truncated, authorization-denied, and
+  acquisition-failed outcomes remain visible instead of being filtered away.
+  Bootstrap acquisition and promotion preserve a complete, selection-bound
+  outcome report even though only successful metadata-open/count observations
+  enter the lock and exhaustive regression manifest. This bootstrap count-only
+  observation does not decode keys or payloads and is not structural or
+  exhaustive validation. Promotion records the canonical source-draft and
+  promoted-lock identities; the reviewed lock and complete outcome report are
+  an independently verifiable pair and must be tracked together.
+
+The AALookup `generate-dictionary-catalog.mjs` output is only a candidate
+source. Its model prompt requests a "reasonable set," explicitly says it need
+not visit every file, and defaults to 25 browsing steps. No current draft was
+available in the referenced checkout. Consequently, importing such a draft
+must never auto-promote entries into a reviewed lock.
+
+For the deterministic audit started at `2026-08-10T04:06:35.081Z`, "all direct
+MDX files" means the 1,254 direct `.mdx`/`.MDX` rows exposed while recursively
+traversing 990 same-origin auto-index directories below
+`https://mdx.mdict.org/`. The exact tracked inventory file SHA-256 is
+`51ba61e985e42351ce7a1ee0c7713ac1f9f02284870383a12c3350ad2b5fa74d`.
+The inventory itself is
+[`corpus/mdict-org-2026-08-10.inventory.json`](../corpus/mdict-org-2026-08-10.inventory.json).
+The MDX rows advertised 40,084,630,153 bytes and their directory-listing
+fingerprint was
+`cfa8cdc0e3b1579280398a295e45b7b56fb7c5ee856aa138492cbc72e6eac77d`.
+That scope excludes the rest of the Internet and files hidden inside archives
+or generated by scripts. It is not a payload-integrity claim. The same crawl
+found 335 direct MDD links totaling 47,594,522,494 bytes with listing
+fingerprint
+`5bd6e1a9106b128b34770a35232c2a289c47c39c628d68bcdb42d00ec9b3d823`.
+Four MDX and two MDD files exceeded 2 GiB. NFC-normalized,
+Unicode-lowercased decoded basenames collided across 59 groups/123 MDX rows
+and 25 groups/54 MDD rows.
+Across every listed type, it recorded 2,992 direct files advertising
+144,841,177,042 bytes.
+
+The 2026-08-10 local acquisition completed all 1,254 selected MDX transfers,
+exactly 40,084,630,153 bytes, with zero acquisition errors. Redistribution was
+not authorized, so the payloads remain ignored under `.corpus/` and are not Git
+or Git LFS objects. The tracked acquisition pair is
+[`corpus/catalog.lock.json`](../corpus/catalog.lock.json) (2,197,293 bytes;
+SHA-256
+`d1baaaddc642d926e7f74a33e6d49dc1c302871c5a3dda3de91a872b2c4a4e2d`)
+and
+[`corpus/mdict-org-2026-08-10.acquisition-outcomes.json`](../corpus/mdict-org-2026-08-10.acquisition-outcomes.json)
+(3,383,244 bytes; SHA-256
+`f19ced0c1b844277689cc723d15a762ea81678d3b4a19ddf5e28fe1af568ea65`).
+Count-only bootstrap promoted 792 files with 37,377,272,230 bytes and
+89,051,220 declared entries; its complete outcome denominator retains 453
+non-v2, six summary-decode, and three truncated-record exclusions.
+
+The final full run used isolated artifact processes at concurrency 2 with a
+21,600,000-ms timeout on macOS 26.6 / Darwin 25.6 arm64 (T6020), rustc/cargo
+1.97.1 for `aarch64-apple-darwin`, and Node.js 26.5.1. The tracked exhaustive
+ledger
+[`corpus/mdict-org-2026-08-10.exhaustive-outcomes.json`](../corpus/mdict-org-2026-08-10.exhaustive-outcomes.json)
+(612,424 bytes; SHA-256
+`ba3ac714348f07fa2f90762f08878294dd41289d01bf0db17f31ca92dc26835c`)
+records 757 whole-artifact passes covering 27,098,834,819 bytes and 78,368,836
+fully traversed entries. The remaining 35 artifacts, totaling 10,278,437,411
+bytes and declaring 10,682,384 entries, stopped at the first recorded failure:
+27 record-decode failures, three key-decode failures, two zlib stream failures,
+two zlib ADLER32 mismatches, and one summary-boundary mismatch. Therefore the
+run did not emit a logical TSV or L1 lock. These results are self-observed
+regression evidence, not independent correctness proof. The failure classes
+are recorded at the strict parser boundary; follow-up source forensics found no
+parser change warranted. The exact acquisition, promotion, sync, and exhaustive
+commands are recorded verbatim in `corpus/README.md`.
+
+The corpus also supplied positive whole-file evidence for the narrowly
+supported legacy v2 keyword-index variant: one real 213,587-entry artifact
+completed the full audit. Exhaustive duplicate checking was changed to validate
+each complete duplicate group once and use logarithmic membership probes, with
+a dedicated large noncontiguous-duplicate regression.
+
+CI covers schemas, deterministic transformations, bounded local acquisition
+fixtures, manifest parsing, isolated-runner failure handling, and synthetic
+dictionaries. Full remote acquisition and exhaustive corpus validation are
+manual or self-hosted because they require authorization review plus
+substantial network, disk, and runtime budgets. Full validation clears stale
+outputs before building, identifies and rechecks the audit executable, runs one
+exact-lock artifact per timeout-bounded subprocess, and atomically records a
+complete outcome report bound to the catalog identity, artifact denominator,
+and runner identity; it emits a digest-pinned logical-audit TSV only on complete
+success.
+
+## 8. Reproducibility And Performance Policy
+
+Authorized corpus tests use `MDICT_CORPUS_DIR` plus `mdictlib-corpus.tsv`.
+Version 1 rows declare a normalized relative path, kind, byte count, SHA-256,
+and entry count. Version 2 rows add optional `key_sha256` and
+`payload_sha256`; the isolated exhaustive audit verifies each logical digest
+that is present. A successful exact-denominator full run can atomically emit an
+exact logical-audit TSV, but promoting it into the reviewed lock requires the
+matching canonical complete-success outcome ledger; exact catalog,
+denominator, runner, and audit identities; an explicit self-observed
+acknowledgement; and provenance fields. Explicit ignored-suite invocation fails
+with setup instructions if the corpus or any required fact is absent or wrong.
 
 The benchmark harness reports:
 
@@ -215,7 +361,7 @@ not a cross-machine performance promise. Default limits remain intentionally
 well above the largest observed valid-corpus peak while still bounding hostile
 metadata.
 
-## 8. First-Release Transition (Complete)
+## 9. First-Release Transition (Complete)
 
 The authorized transition completed these external actions:
 
@@ -228,7 +374,7 @@ The authorized transition completed these external actions:
 No parser, test, documentation, benchmark, or package implementation work was
 deferred to the transition.
 
-## 9. Deferred And Out Of Scope
+## 10. Deferred And Out Of Scope
 
 - version 1.x or future-major layouts;
 - mmap, persistent sidecars, larger/LRU caches, async I/O, or parallel
