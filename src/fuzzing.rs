@@ -1,7 +1,7 @@
 //! Narrow adapters used by the out-of-package fuzz harness.
 
-use crate::format::compression::decode_block;
-use crate::format::header::parse_header_bytes;
+use crate::format::common::compression::decode_block;
+use crate::format::common::header::parse_header_bytes;
 use crate::types::{ContainerKind, Limits};
 
 /// Exercises both supported top-level header tags without exposing parser

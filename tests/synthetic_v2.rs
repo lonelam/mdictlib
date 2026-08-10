@@ -8,15 +8,35 @@ use support::FixtureBuilder;
 
 #[test]
 fn unsupported_major_version_wins_over_its_legacy_encoding_label() {
+    // Version resolution must happen before encoding resolution, so a file
+    // this build cannot parse at all is reported as a version refusal rather
+    // than as an encoding refusal.
     let fixture = FixtureBuilder::mdx([("legacy", "record")])
-        .engine_versions("1.2", "1.2")
+        .engine_versions("3.0", "3.0")
         .encoding_label("ISO8859-1")
         .build();
-    let dictionary_file = fixture.write("legacy-version-before-encoding");
+    let dictionary_file = fixture.write("unsupported-version-before-encoding");
     assert!(matches!(
         MdxFile::open(dictionary_file.path()),
         Err(Error::Unsupported(
-            "MDict format major version other than 2"
+            "MDict format major version other than 1 or 2"
+        ))
+    ));
+}
+
+#[test]
+fn iso8859_1_is_refused_precisely_instead_of_being_mapped_to_another_encoding() {
+    // Real v1.2 dictionaries declare this label. Which byte semantics their
+    // creators used is unresolved, so the reader must say so rather than
+    // silently substituting a decoder that would produce plausible mojibake.
+    let fixture = FixtureBuilder::mdx([("latin", "record")])
+        .encoding_label("ISO8859-1")
+        .build();
+    let dictionary_file = fixture.write("iso8859-1-label");
+    assert!(matches!(
+        MdxFile::open(dictionary_file.path()),
+        Err(Error::Unsupported(
+            "ISO8859-1 text encoding (MDict byte semantics unresolved)"
         ))
     ));
 }

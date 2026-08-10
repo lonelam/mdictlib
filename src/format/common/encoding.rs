@@ -14,29 +14,65 @@ pub enum TextEncoding {
 }
 
 impl TextEncoding {
-    pub fn for_container(kind: ContainerKind, header: &Header) -> Result<Self> {
+    /// Resolves the encoding used for physical keys.
+    ///
+    /// MDD keys are always UTF-16LE regardless of any declared label; MDX keys
+    /// follow the header's `Encoding` attribute and default to UTF-8 when it is
+    /// absent.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the declared label names an encoding this build does
+    /// not support.
+    pub fn for_keys(kind: ContainerKind, header: &Header) -> Result<Self> {
         match kind {
             ContainerKind::Mdd => Ok(Self::Utf16Le),
-            ContainerKind::Mdx => {
-                let label = header.encoding_label.as_deref().unwrap_or("UTF-8").trim();
-                if label.eq_ignore_ascii_case("UTF-8") || label.eq_ignore_ascii_case("UTF8") {
-                    Ok(Self::Utf8)
-                } else if label.eq_ignore_ascii_case("UTF-16")
-                    || label.eq_ignore_ascii_case("UTF-16LE")
-                    || label.eq_ignore_ascii_case("UTF16")
-                {
-                    Ok(Self::Utf16Le)
-                } else if label.eq_ignore_ascii_case("GBK") || label.eq_ignore_ascii_case("GB2312")
-                {
-                    Ok(Self::Gbk)
-                } else if label.eq_ignore_ascii_case("GB18030") {
-                    Ok(Self::Gb18030)
-                } else if label.eq_ignore_ascii_case("BIG5") {
-                    Ok(Self::Big5)
-                } else {
-                    Err(Error::Unsupported("text encoding"))
-                }
-            }
+            ContainerKind::Mdx => Self::from_label(header.encoding_label.as_deref()),
+        }
+    }
+
+    /// Resolves the encoding used for record payloads.
+    ///
+    /// MDD payloads are opaque bytes and are never text-decoded, so this
+    /// returns `None` for MDD. MDX records use the same encoding as MDX keys.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error under the same conditions as [`Self::for_keys`].
+    pub fn for_records(kind: ContainerKind, header: &Header) -> Result<Option<Self>> {
+        match kind {
+            ContainerKind::Mdd => Ok(None),
+            ContainerKind::Mdx => Self::from_label(header.encoding_label.as_deref()).map(Some),
+        }
+    }
+
+    fn from_label(label: Option<&str>) -> Result<Self> {
+        let label = label.unwrap_or("UTF-8").trim();
+        if label.eq_ignore_ascii_case("UTF-8") || label.eq_ignore_ascii_case("UTF8") {
+            Ok(Self::Utf8)
+        } else if label.eq_ignore_ascii_case("UTF-16")
+            || label.eq_ignore_ascii_case("UTF-16LE")
+            || label.eq_ignore_ascii_case("UTF16")
+        {
+            Ok(Self::Utf16Le)
+        } else if label.eq_ignore_ascii_case("GBK") || label.eq_ignore_ascii_case("GB2312") {
+            Ok(Self::Gbk)
+        } else if label.eq_ignore_ascii_case("GB18030") {
+            Ok(Self::Gb18030)
+        } else if label.eq_ignore_ascii_case("BIG5") {
+            Ok(Self::Big5)
+        } else if label.eq_ignore_ascii_case("ISO8859-1")
+            || label.eq_ignore_ascii_case("ISO-8859-1")
+            || label.eq_ignore_ascii_case("LATIN1")
+        {
+            // Real v1.2 dictionaries declare this label, but which byte
+            // semantics creators actually used is unresolved. Refuse precisely
+            // rather than silently substituting a compatible-looking decoder.
+            Err(Error::Unsupported(
+                "ISO8859-1 text encoding (MDict byte semantics unresolved)",
+            ))
+        } else {
+            Err(Error::Unsupported("text encoding"))
         }
     }
 

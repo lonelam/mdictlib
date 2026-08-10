@@ -4,6 +4,40 @@ All notable changes are recorded here.
 
 ## [Unreleased]
 
+No release version has been selected for this work.
+
+### Added
+
+- MDict major version 1 MDX and MDD support, read through the unchanged public
+  API and the same shared core: a 16-byte four-`u32` keyword header, raw
+  keyword metadata, one-byte summary lengths without terminators, `u32`
+  big-endian key-row record offsets, a four-`u32` record header, and
+  eight-byte record-index rows. Every 32-bit field is widened to a checked
+  `u64` before it leaves the version 1 grammar.
+- A precise refusal for the ISO8859-1 text label, which real version 1.2
+  dictionaries declare but whose MDict byte semantics are unresolved. It is not
+  silently mapped onto another decoder.
+- A precise refusal for version 1 files that declare encryption, for which no
+  framing has been established.
+
+### Changed
+
+- Restructured wire-format parsing into `format::common`, `format::v1`, and
+  `format::v2`. The version is resolved once, immediately after the bounded
+  common header, and matched in exactly one place; both grammars emit the same
+  private `ValidatedLayout`. The lazy key-row grammar moved out of the shared
+  core behind a statically selected function pointer, so no version conditional
+  reaches lookup, iteration, ordinal access, record decoding, or MDD streaming.
+  No trait-object dispatch, no runtime conversion between versions, and no
+  cross-version grammar retry.
+- Unsupported major versions now report `MDict format major version other than
+  1 or 2`. Version resolution still keys on `GeneratedByEngineVersion`,
+  unchanged from `0.1.0`.
+
+This restructuring is behavior-preserving for version 2: the public API is
+byte-for-byte identical to `v0.1.0`, and version 2 corpus entry counts, key
+digests, and payload digests are unchanged.
+
 ### Fixed
 
 - Accepted a narrowly identified legacy v2 keyword-index layout only when the
@@ -17,6 +51,32 @@ All notable changes are recorded here.
 
 ### Validation And Tooling
 
+- Added `tests/architecture.rs`, an executable contract asserting that version
+  names cannot leak back into the shared core or the MDX/MDD facades, that the
+  two grammars cannot see each other, that only the format facade matches on a
+  wire version, and that the parsing path uses no trait-object dispatch.
+- Added independent version 1 MDX and MDD fixture encoders in
+  `tests/support/v1.rs`, physically separate from the version 2 encoder and
+  never calling parser code, including an LZO1X encoder that emits real
+  lookbehind matches rather than literal-only streams.
+- Added `tests/shared_core_parity.rs`, which builds the same logical dictionary
+  under both wire versions and runs the same assertions over both.
+- Added `tests/conformance_v1.rs` and `tests/hardening_v1.rs` covering
+  encodings, block codings, duplicates, cross-block records, empty
+  dictionaries, the full malformed matrix, version fallthrough, mutation and
+  truncation sweeps, limit enforcement, and deterministic failure replay.
+- Added `v1_whole_file`, `v1_truncation`, and `version_dispatch` fuzz targets
+  alongside the retained version 2 targets and seeds.
+- Added `examples/v1_audit.rs`, `examples/v1_dump.rs`, and
+  `scripts/corpus/audit-v1.mjs`, which re-derive the real version 1 corpus
+  evidence from the tracked acquisition ledger using two independent
+  observations per artifact and retain a structured outcome for every row.
+  407 of 453 real v1.2 MDX artifacts complete full validation covering
+  43,185,052 entries; all 46 rejections carry a structured classification.
+- Added `scripts/corpus/acquire-v1-mdd.mjs`, a bounded opt-in acquisition of
+  the MDD candidates paired with version 1 MDX rows. All 16 were acquired under
+  an explicitly approved proposal and all 16 passed full resource, span, and
+  streaming validation; 14 declare version 1.2 and 77,863 entries.
 - Added a deterministic, metadata-only inventory workflow for direct MDict
   files, including an aggregate in-flight page-body cap, with a reviewed
   catalog boundary and bounded acquisition into an ignored local corpus cache.

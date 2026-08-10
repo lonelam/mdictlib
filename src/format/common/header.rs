@@ -2,13 +2,14 @@ use std::mem::size_of;
 use std::sync::Arc;
 
 use crate::error::{Error, Result};
-use crate::format::checksum::verify_adler32;
-use crate::format::cursor::Cursor;
-use crate::format::encoding::TextEncoding;
+use crate::format::common::checksum::verify_adler32;
+use crate::format::common::cursor::Cursor;
+use crate::format::common::descriptors::SectionRange;
+use crate::format::common::encoding::TextEncoding;
+use crate::format::common::source::FileSource;
 use crate::limits::{
     MemoryBudget, checked_u64, checked_usize, ensure_u64_limit, try_reserve_string, try_reserve_vec,
 };
-use crate::source::FileSource;
 use crate::types::{ContainerKind, Header, Limits};
 
 #[derive(Debug, Clone)]
@@ -16,6 +17,8 @@ pub struct HeaderSection {
     pub header: Header,
     pub keyword_section_offset: u64,
     pub retained_bytes: usize,
+    /// Exact validated byte range covering the whole header section.
+    pub section: SectionRange,
 }
 
 /// Parses the top-level MDict header from a file-backed source.
@@ -131,6 +134,7 @@ fn build_header_section(
         header,
         keyword_section_offset,
         retained_bytes,
+        section: SectionRange::new(0, keyword_section_offset),
     })
 }
 

@@ -12,12 +12,11 @@ pub(crate) use locator::{LocatedKeys, LocatorBasis};
 pub(crate) use records::RecordDescriptor;
 
 use crate::error::{Error, Result};
-use crate::format::encoding::TextEncoding;
-use crate::format::header::parse_header;
-use crate::format::key_index::{KeyIndex, parse_key_index};
-use crate::format::record_index::{RecordIndex, parse_record_index};
+use crate::format::TextEncoding;
+use crate::format::common::descriptors::ValidatedLayout;
+use crate::format::common::source::FileSource;
+use crate::format::open_layout;
 use crate::limits::{MemoryBudget, MemoryReservation, ensure_usize_limit, try_clone_string};
-use crate::source::FileSource;
 use crate::types::{ContainerKind, Header, Limits, MemoryUsage, OpenOptions};
 
 use self::keys::DecodedKeyBlock;
@@ -163,19 +162,20 @@ impl CachedFailure {
     }
 }
 
+/// One open dictionary, shared by MDX and MDD and by every wire version.
+///
+/// The core is deliberately version-blind: it holds a
+/// [`ValidatedLayout`] whose geometry has already been widened, range-checked,
+/// and limit-checked by whichever grammar produced it, plus the statically
+/// selected wire operations it calls on a lazy cache miss. Nothing here can
+/// observe or branch on the file's declared version.
 pub(crate) struct MdictFile {
     kind: ContainerKind,
     source: Arc<FileSource>,
-    header: Header,
-    key_encoding: TextEncoding,
+    layout: ValidatedLayout,
     normalizer: KeyNormalizer,
-    key_index: KeyIndex,
-    record_index: RecordIndex,
     limits: Limits,
     memory: Arc<MemoryBudget>,
-    _header_memory: MemoryReservation,
-    _key_index_memory: MemoryReservation,
-    _record_index_memory: MemoryReservation,
     key_block_cache: Mutex<Option<(usize, CachedValue<DecodedKeyBlock>)>>,
     record_block_cache: Mutex<Option<(usize, CachedValue<DecodedRecordBlock>)>>,
     locator: OnceLock<CachedValue<KeyLocator>>,
@@ -188,10 +188,10 @@ impl std::fmt::Debug for MdictFile {
             .debug_struct("MdictFile")
             .field("kind", &self.kind)
             .field("source", &self.source)
-            .field("header", &self.header)
-            .field("key_encoding", &self.key_encoding)
-            .field("key_index", &self.key_index)
-            .field("record_index", &self.record_index)
+            .field("header", &self.layout.header)
+            .field("key_encoding", &self.layout.key_encoding)
+            .field("key_blocks", &self.layout.key_blocks.len())
+            .field("record_blocks", &self.layout.record_blocks.len())
             .finish_non_exhaustive()
     }
 }
@@ -205,54 +205,16 @@ impl MdictFile {
         let source = Arc::new(FileSource::open(path)?);
         let limits = options.limits.clone();
         let memory = Arc::new(MemoryBudget::new(limits.working_memory_bytes));
-        let header_section = parse_header(&source, kind, &limits, &memory)?;
-        let header_memory = memory.reserve(header_section.retained_bytes, "parsed header")?;
-        if !header_section.header.is_v2() {
-            return Err(Error::Unsupported(
-                "MDict format major version other than 2",
-            ));
-        }
-        let key_encoding = TextEncoding::for_container(kind, &header_section.header)?;
-        let key_index = parse_key_index(
-            &source,
-            &header_section.header,
-            key_encoding,
-            header_section.keyword_section_offset,
-            options,
-            &memory,
-        )?;
-        let key_index_memory =
-            memory.reserve(key_index.retained_bytes, "keyword block metadata")?;
-        let record_index = parse_record_index(
-            &source,
-            &header_section.header,
-            key_index.record_section_offset,
-            &limits,
-            &memory,
-        )?;
-        let record_index_memory =
-            memory.reserve(record_index.retained_bytes, "record block metadata")?;
-        if key_index.num_entries != record_index.num_entries {
-            return Err(Error::InvalidData(format!(
-                "entry count mismatch between key index ({}) and record index ({})",
-                key_index.num_entries, record_index.num_entries
-            )));
-        }
-        let normalizer = KeyNormalizer::from_header(&header_section.header);
+        let layout = open_layout(&source, kind, options, &memory)?;
+        let normalizer = KeyNormalizer::from_header(&layout.header);
 
         Ok(Self {
             kind,
             source,
-            header: header_section.header,
-            key_encoding,
+            layout,
             normalizer,
-            key_index,
-            record_index,
             limits,
             memory,
-            _header_memory: header_memory,
-            _key_index_memory: key_index_memory,
-            _record_index_memory: record_index_memory,
             key_block_cache: Mutex::new(None),
             record_block_cache: Mutex::new(None),
             locator: OnceLock::new(),
@@ -261,11 +223,11 @@ impl MdictFile {
     }
 
     pub(crate) fn header(&self) -> &Header {
-        &self.header
+        &self.layout.header
     }
 
     pub(crate) fn len(&self) -> u64 {
-        self.key_index.num_entries
+        self.layout.total_entries
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -273,12 +235,7 @@ impl MdictFile {
     }
 
     pub(crate) fn memory_usage(&self) -> Result<MemoryUsage> {
-        let metadata_bytes = self
-            ._header_memory
-            .bytes()
-            .checked_add(self._key_index_memory.bytes())
-            .and_then(|bytes| bytes.checked_add(self._record_index_memory.bytes()))
-            .ok_or(Error::InvalidFormat("metadata memory accounting overflow"))?;
+        let metadata_bytes = self.layout.retained.metadata_bytes()?;
         let locator_bytes = self.locator.get().map_or(0, |locator| match locator {
             CachedValue::Ready(locator) => locator.memory_bytes(),
             CachedValue::Failed(_) => 0,
@@ -313,21 +270,29 @@ impl MdictFile {
         ))
     }
 
-    pub(crate) fn text_encoding(&self) -> TextEncoding {
-        self.key_encoding
+    /// Returns the encoding used to decode record text.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for containers whose records are opaque bytes.
+    pub(crate) fn record_text_encoding(&self) -> Result<TextEncoding> {
+        self.layout
+            .record_encoding
+            .ok_or(Error::InvalidFormat("container records are not text"))
     }
 
     pub(crate) fn reserve_decoded_record_text(
         &self,
         encoded_len: u64,
     ) -> Result<MemoryReservation> {
+        let encoding = self.record_text_encoding()?;
         let encoded_len = crate::limits::checked_usize(encoded_len, "encoded MDX record length")?;
         ensure_usize_limit(
             "materialized_record_bytes",
             encoded_len,
             self.limits.materialized_record_bytes,
         )?;
-        let decoded_len = self.key_encoding.max_decoded_len(encoded_len)?;
+        let decoded_len = encoding.max_decoded_len(encoded_len)?;
         ensure_usize_limit(
             "materialized_record_bytes",
             decoded_len,
@@ -340,7 +305,7 @@ impl MdictFile {
     }
 
     pub(super) fn key_block_count(&self) -> usize {
-        self.key_index.blocks.len()
+        self.layout.key_blocks.len()
     }
 
     pub(crate) fn keys(&self) -> KeyIter<'_> {

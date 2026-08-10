@@ -1,18 +1,24 @@
 # mdictlib Implementation Roadmap
 
-Last updated: 2026-08-10
+Last updated: 2026-08-11 (v1 implemented)
 
-## 1. Release State And Design Premise
+## 1. Release State And Active Program
 
-`mdictlib` `0.1.0` is the first public release. The repository established one
-coherent API before publication rather than carrying compatibility shims for
-earlier local-only designs.
+`mdictlib` `0.1.0` is the first public release and supports MDict major version
+2 only. Every milestone in the released roadmap (sections 6 and 10) is complete.
 
-All implementation milestones and the first-release transition in this roadmap
-are complete. Future releases remain explicit maintainer actions governed by
-the `0.x` compatibility policy in `AGENTS.md`.
+The **MDict version 1 compatibility program is implemented** in the working
+tree. Milestones 1 through 6 are complete; milestone 7 is complete except for
+its one approval-blocked input. No release version has been selected or
+authorized, and nothing has been published, tagged, or pushed.
 
-Evidence rules:
+Real version 1 MDD evidence is complete: 16 candidates were acquired under an
+explicitly approved bounded proposal and all 16 passed full validation, 14 of
+them declaring version 1.2. Future releases remain
+explicit maintainer actions governed by the `0.x` compatibility policy in
+`AGENTS.md`.
+
+Evidence rules (unchanged, and binding on the v1 program):
 
 - the checked-in source and executable tests are authoritative;
 - `draft/` supplied audit observations and test targets, not importable code;
@@ -22,12 +28,15 @@ Evidence rules:
 - discovery metadata is a candidate input until a human review records source,
   authorization, and immutable acquisition facts;
 - corpus claims must name a manifest digest, host/toolchain, and exact command;
-- performance numbers are baselines on the measured host, not universal SLAs.
+- performance numbers are baselines on the measured host, not universal SLAs;
+- a number carried forward from an earlier session without a tracked artifact is
+  labelled as such and must be re-derived before it can gate anything.
 
 ## 2. Goal And Supported Scope
 
-The `0.1.0` release is a defensive, library-first reader for MDict major version
-2 `.mdx` and `.mdd` files. It provides:
+### Shipped in `0.1.0`
+
+A defensive, library-first reader for MDict major version 2 `.mdx` and `.mdd`:
 
 - one shared, file-backed parser for MDX and MDD;
 - eager bounded metadata/index parsing with lazy key and record blocks;
@@ -51,13 +60,22 @@ the legacy layout only when that check fails but the exact little-endian value
 matches; only that layout omits the first/last-summary terminators. Count and
 size sums, decoded-summary validity, complete index consumption, key-block
 checksums, and decoded boundary comparisons remain mandatory. This is a private
-wire-format decision and does not change the public API.
+wire-format decision inside the v2 grammar and does not change the public API.
+It is a checksum-byte-order disambiguation within one major version, **not** a
+cross-version grammar retry, and section 8's no-retry rule does not forbid it.
 
-Version 1.x and future-major layouts, writing, HTML/style processing,
-multi-volume discovery, prefix/fuzzy search, resource extraction policy,
-mmap, and persistent sidecar indexes are out of scope.
+### Planned by the v1 program
 
-## 3. Final Architecture
+MDict major version 1 `.mdx` and `.mdd` behind the same public API, the same
+shared core, and the same limits. Adding v1 must not change the public API.
+
+### Still out of scope
+
+Future-major layouts, writing, HTML/style processing, multi-volume discovery,
+prefix/fuzzy search, resource extraction policy, mmap, and persistent sidecar
+indexes.
+
+## 3. Architecture As Implemented
 
 ```text
 public root API
@@ -68,8 +86,8 @@ public root API
   └── Error / Result
             │
             ▼
-src/core/
-  ├── mod.rs       shared open state, caches, memory accounting
+src/core/            version-blind shared core
+  ├── mod.rs       open state, caches, memory accounting
   ├── keys.rs      lazy key blocks and ordinal resolution
   ├── records.rs   record descriptors, lazy blocks, span traversal
   ├── iter.rs      shared fused physical iterators
@@ -77,18 +95,29 @@ src/core/
   └── locator.rs   lazy global duplicate-aware locator
             │
             ▼
-src/format/
-  ├── header.rs / key_index.rs / record_index.rs
-  ├── cursor.rs / encoding.rs
-  └── checksum.rs / compression.rs / crypto.rs
+src/format/mod.rs    common header, WireVersion, the only version match
+            │
+            ▼
+      ValidatedLayout
+       /           \
+src/format/v1/   src/format/v2/
+  mod.rs           mod.rs
+  keyword.rs       keyword.rs
+  record.rs        record.rs
+                   crypto.rs
 
-private cross-cutting modules: source.rs and limits.rs
+src/format/common/   descriptors, header, cursor, checked, encoding,
+                     compression, checksum, crypto, source
+private cross-cutting module: limits.rs
 ```
 
-Dependency rules:
+Dependency rules, all enforced by `tests/architecture.rs`:
 
 - `mdx.rs` and `mdd.rs` are payload-specific facades only;
-- format parsing never depends on the core or forks by container kind;
+- `src/core`, `src/mdx.rs`, and `src/mdd.rs` name no wire version;
+- `format::v1` and `format::v2` import neither the core, the facades, nor each
+  other, and only the facade names `WireVersion`;
+- the parsing path uses no trait-object dispatch and no version conversion;
 - MDX and MDD share key, locator, record-descriptor, cache, and budget paths;
 - normalization is lookup policy, not text encoding;
 - concrete iterators, parser/index types, codecs, sources, and caches stay
@@ -96,7 +125,185 @@ Dependency rules:
 - the separate fuzz crate reaches only narrow doc-hidden adapters under
   cargo-fuzz's checked `cfg(fuzzing)`; no fuzz-only Cargo feature is published.
 
-## 4. First-Release API Contract
+### The four version-2 leaks that were removed
+
+| Former site | Resolution |
+| --- | --- |
+| `MdictFile::open()` checking `Header::is_v2()` | replaced by `format::open_layout`, which resolves `WireVersion` once |
+| `parse_key_index()` repeating the check and owning the v2 keyword grammar | moved verbatim to `format::v2::keyword` |
+| `parse_record_index()` repeating the check and owning the v2 record grammar | moved verbatim to `format::v2::record` |
+| `core::keys::parse_key_block_entries()` hard-coding a `u64` record offset | moved to `format::v2::keyword::decode_key_rows` and reached through `WireOperations` |
+
+`Header::is_v2()` was removed. Version resolution now reads the major component
+of `GeneratedByEngineVersion` inside `format::mod.rs`, preserving the shipped
+`0.1.0` behavior exactly; section 9 keeps changing that attribute a gated
+decision.
+
+## 4. Version Dispatch, As Built
+
+### 4.1 One decision point
+
+The wire version is detected exactly once, immediately after the bounded common
+header is parsed and before any keyword or record bytes are read:
+
+```text
+common header
+    -> one private WireVersion decision
+    -> exactly one concrete match:
+         V1 => format::v1::parse(...)
+         V2 => format::v2::parse(...)
+    -> shared ValidatedLayout
+    -> unchanged shared core
+```
+
+`WireVersion` is a private enum in `src/format/mod.rs`. `src/format/mod.rs` is
+the only file in the crate that contains a `match` on it.
+
+### 4.2 Physical module layout
+
+```text
+src/format/
+  mod.rs                    common-header entry point and the only version match
+  common/
+    mod.rs
+    descriptors.rs          validated version-neutral descriptors
+    header.rs               (moved from src/format/header.rs)
+    cursor.rs               (moved)
+    checked.rs              checked widening/arithmetic used by both grammars
+    encoding.rs             (moved)
+    compression.rs          (moved; shared 8-byte block envelope)
+    checksum.rs             (moved)
+    crypto.rs               only proven shared algorithms/framing
+    source.rs               (moved from src/source.rs)
+  v1/
+    mod.rs                  parse(): keyword + record sections -> ValidatedLayout
+    keyword.rs              v1 keyword header, key metadata, key-row decoder
+    record.rs               v1 record header and record index
+  v2/
+    mod.rs                  parse(): keyword + record sections -> ValidatedLayout
+    keyword.rs              current v2 grammar + the narrow legacy-v2 variant
+    record.rs               current v2 record grammar
+    crypto.rs               only if keyword-header/index framing proves v2-specific
+```
+
+Moves are mechanical; `src/source.rs` becomes `src/format/common/source.rs` and
+its only consumers are `core/mod.rs` and the format layer, so the move does not
+touch `MddResourceSpan`'s retained `Arc<FileSource>` semantics.
+
+### 4.3 Dependency rules
+
+- `format::v1` and `format::v2` must not import `core`, `mdx`, `mdd`, or each
+  other. They may import `format::common`, `crate::error`, `crate::limits`, and
+  `crate::types` (`Header`, `Limits`, `OpenOptions`, `Passcode`,
+  `ContainerKind`).
+- `src/core`, `src/mdx.rs`, and `src/mdd.rs` must not name `WireVersion`, `v1`,
+  or `v2` in any identifier, import, string, or error message.
+- No version check may appear in lookup, iteration, ordinal access, record
+  decoding, or MDD streaming.
+- One shared MDX/MDD parsing core. No separate v1 MDX and v1 MDD cores.
+- No trait-object dispatch anywhere on this path.
+- No runtime conversion of v1 bytes into v2 bytes, in memory or on disk.
+- Lazy key and record decoding is preserved exactly.
+
+These are enforceable mechanically; section 9 turns them into gates.
+
+### 4.4 `ValidatedLayout`: the descriptor boundary
+
+`format::common::descriptors` owns every type that crosses from a grammar module
+into the core. Nothing version-specific crosses it.
+
+```rust
+pub(crate) struct ValidatedLayout {
+    pub(crate) header: Header,
+    pub(crate) key_encoding: TextEncoding,
+    pub(crate) record_encoding: Option<TextEncoding>,
+    pub(crate) sections: SectionRanges,
+    pub(crate) total_entries: u64,
+    pub(crate) total_decoded_record_len: u64,
+    pub(crate) key_blocks: Vec<KeyBlockDescriptor>,
+    pub(crate) record_blocks: Vec<RecordBlockDescriptor>,
+    pub(crate) wire: WireOps,
+    pub(crate) retained: RetainedBudget,
+}
+```
+
+- `key_encoding` / `record_encoding` are **separate**. Today one
+  `key_encoding` field serves both key decoding and MDX record-text decoding
+  ([`src/core/mod.rs:316`](../src/core/mod.rs:316) feeds
+  [`src/mdx.rs:219`](../src/mdx.rs:219)). Splitting them is a behavioral no-op
+  for v2 — MDX sets both to the header encoding; MDD sets `key_encoding` to
+  UTF-16LE and `record_encoding` to `None` because MDD payloads stay bytes — and
+  it is a precondition for stating MDD's v1 key/payload asymmetry without a
+  container-kind fork in the core.
+- `SectionRanges` holds exact, already-`ensure_range`-checked
+  `(offset, len)` pairs for the header, keyword header, keyword index, keyword
+  block data, record header, record index, and record block data.
+- `total_entries` and `total_decoded_record_len` replace today's
+  `KeyIndex::num_entries` / `RecordIndex::total_decompressed_len`. The
+  key-versus-record entry-count cross-check
+  ([`src/core/mod.rs:235`](../src/core/mod.rs:235)) moves into
+  `format::mod.rs` so the core receives one reconciled count.
+- `KeyBlockDescriptor` and `RecordBlockDescriptor` are today's `KeyBlockInfo` and
+  `RecordBlockInfo` with cumulative `u64` offsets, cumulative `u64` entry-start
+  indexes, decoded `String` summaries, and `u64` sizes, unchanged in shape.
+- `RetainedBudget` carries the metadata `retained_bytes` figures and the
+  `MemoryReservation` values that `MdictFile` holds today, so accounting and
+  `MemoryUsage` output are unchanged.
+
+### 4.5 Selected static lazy wire operations
+
+v1 key rows carry a `u32` big-endian record offset; v2 rows carry a `u64`. That
+difference is the only version-specific decision that survives past open time,
+and it is resolved by selecting a private non-capturing function at the single
+match:
+
+```rust
+pub(crate) type DecodeKeyRows =
+    fn(&[u8], &KeyRowContext) -> Result<Vec<DecodedKeyRow>>;
+
+pub(crate) struct WireOps {
+    pub(crate) decode_key_rows: DecodeKeyRows,
+    // add further static fns only if block-envelope parsing proves
+    // version-specific; same pattern, never a trait object.
+}
+```
+
+- `DecodedKeyRow { key: String, record_start: u64 }` lives in
+  `format::common::descriptors`; the core's `DecodedKeyEntry` becomes an alias
+  or a direct re-use of it.
+- `KeyRowContext` carries what the decoder needs without touching the core:
+  key encoding, expected entry count, and `total_decoded_record_len` for the
+  offset bound. It deliberately carries **no** limits or memory budget: the
+  block's entry count is already bounded when the keyword metadata is parsed,
+  and the decoded block's size is charged by the caller before the decoder
+  runs, so passing them would be unused surface.
+- The core stores `WireOps` and calls `(self.wire.decode_key_rows)(bytes, &ctx)`
+  without knowing the version. The monotonicity checks — non-decreasing
+  `record_start` within a block and across block boundaries — stay in the core,
+  because they are the same invariant for both grammars.
+- `format::v2::keyword::decode_key_rows` is today's
+  `core::keys::parse_key_block_entries` moved verbatim.
+  `format::v1::keyword::decode_key_rows` reads a `u32` and widens it.
+
+This is concrete function-pointer dispatch: monomorphic, non-capturing, no
+`dyn`, no vtable, and no per-row branch.
+
+### 4.6 Widening and validation rules for `format::v1`
+
+- Every `u32` read by `format::v1` is widened to `u64` with an explicit
+  `u64::from`, and every derived value is checked, **before** it leaves
+  `format::v1`. No unchecked `as` casts.
+- All section arithmetic, cumulative counts, ranges, limits, and `usize`
+  conversions are validated inside the grammar module; descriptors reaching the
+  core are already valid.
+- The existing limit names and error variants are reused unchanged, so v1
+  rejections are indistinguishable in kind from v2 rejections at the public API.
+- v1 reuses `format::common::compression::decode_block`, so the shared
+  eight-byte block envelope (four-byte tag, big-endian ADLER32, payload) and its
+  exact-length and checksum rules apply identically. If a v1 file proves to use
+  a different envelope, that is a finding for section 8.3, not a fallback.
+
+## 5. Public API Contract (unchanged by the v1 program)
 
 ### Physical identity
 
@@ -155,11 +362,11 @@ each decoded block remains bounded.
 - `Header` exposes semantic getters plus exact raw attribute iteration;
 - public payload debug output reports lengths rather than dumping content.
 
-## 5. Defensive Invariants
+## 6. Defensive Invariants
 
 Every file-derived count, length, offset, range, decoded size, reservation, and
-section sum is checked before the corresponding read or allocation. The
-release additionally enforces:
+section sum is checked before the corresponding read or allocation. The shipped
+release enforces:
 
 - the header ceiling before reading its declared body;
 - checked `u64`/`usize` conversions and checked add/multiply throughout;
@@ -180,7 +387,10 @@ release additionally enforces:
 - iterator error fusion after descriptor or payload failures;
 - no `unsafe` code.
 
-## 6. Completed Milestones And Exit Evidence
+The v1 program adds no relaxation. It adds section 4.6's widening rules and
+requires that every v1-specific rejection reuse an existing `Error` variant.
+
+## 7. Completed v2 Milestones And Exit Evidence
 
 | Milestone | Status | Exit evidence |
 | --- | --- | --- |
@@ -206,7 +416,412 @@ and five MDD, totaling 3,605,052,185 bytes and 804,572 physical entries. Every
 raw key resolved, every ordinal/payload route agreed, and streaming/materialized
 MDD hashes matched. Private file bytes and identifying paths are excluded.
 
-## 7. Corpus Provenance And Acquisition Policy
+## 8. V1 Compatibility Program
+
+### 8.1 Clean-room and no-conversion rules
+
+These rules are absolute and apply to every milestone below.
+
+1. **No copying from copyleft sources.** Do not copy code, pseudocode,
+   identifier names, module structure, comment text, or control flow from any
+   GPL- or AGPL-licensed reference into `mdictlib`. Behavioral observation only:
+   what bytes go in, what values come out, which inputs are rejected.
+2. **Permissive sources are still not a shortcut.** MIT-licensed references may
+   be run as oracles and read, but any actual reuse of their text requires an
+   explicit, recorded attribution decision before it happens. Default to
+   independent derivation.
+3. **Ports and repacks are not independent confirmation.** Two projects in the
+   same lineage agreeing about a field width is one observation, not two.
+   Section 8.2 records lineage for exactly this reason.
+4. **Writers are oracles, not specifications.** A writer's output proves a
+   decoder accepts what that writer emits. It never proves real creators emit
+   the same bytes. Any writer-derived expectation must be corroborated by an
+   authorized real artifact before it can gate acceptance.
+5. **No runtime conversion.** v1 bytes are never rewritten into a v2 shape, in
+   memory or on disk, to reuse the v2 grammar.
+6. **No cross-version grammar retry.** A file that fails the v1 grammar is never
+   re-attempted as v2, or the reverse. The version decision is made once, from
+   the header, and a grammar failure is a failure. (The existing legacy-v2
+   keyword-index checksum disambiguation in section 2 is inside one major
+   version and is unaffected.)
+7. **No permissive parsing.** No brute-force parsing, no grammar retries, no
+   silent checksum bypasses, no heuristic encoding changes, no lossy fallback.
+   An unresolved artifact stays classified as unresolved.
+8. **Conversion and writer tools stay outside the library.** Any converter or
+   writer built during this program is a separately reviewed diagnostic or test
+   oracle. It is never linked into the published crate and never called by
+   parser code.
+
+### 8.2 Source, license, and provenance matrix
+
+Lineage classes: **A** = Python `mdict-analysis` family, **B** = GoldenDict C++
+family, **C** = JavaScript family, **D** = Java, **E** = Rust, **W** = writer.
+Independence means "different lineage class", not "different repository".
+
+#### Cloned and pinned locally (outside this repository)
+
+| Project | Revision | Local path | License facts | Lineage | Claimed MDX/MDD | Use |
+| --- | --- | --- | --- | --- | --- | --- |
+| `ffreemt/readmdict` | `d9c53dc1515f99ae5a2d6b1d89212c9b680e0c59` | `../mdict-v1-references/readmdict` | `pyproject` metadata says MIT, but the copied parser retains a GPLv3 source header — **treat as GPLv3** | A (repack of `csarron/mdict-analysis`) | MDX + MDD | clean-room behavioral only; **not** independent confirmation |
+| `goldendict/goldendict` | `b4f3fcdc4861975ec49ae2bb894f907c072fc8f6` | `../mdict-v1-references/goldendict` | GPLv3-or-later | B | MDX + MDD | clean-room behavioral only |
+| `binhetech/mdict-parser` | `257885176aa572953b044e9ff68b88fecc86cdf9` | `../mdict-v1-references/mdict-parser` | `readmdict.py` carries a GPLv3 header; appears to be another `readmdict` copy | A | MDX + MDD | clean-room behavioral only; **not** independent confirmation |
+| `lengyijun/mdict-cli-rs` | `1df631794440d2837fbfb9f81e47d85077074386` | `../mdict-v1-references/mdict-cli-rs` | **no `LICENSE` file in tree and no README license statement** | none — contains no parser; `src/mdict_wrapper.rs` delegates to the crates.io `mdict` 0.1 crate | n/a | **excluded.** Not a reader lineage. Present locally but unplanned; do not use for behavioral research until its license and the `mdict` crate's lineage are separately reviewed |
+
+#### To clone and pin during milestone 1
+
+| Project | Revision | License facts | Lineage | Claimed MDX/MDD | Use |
+| --- | --- | --- | --- | --- | --- |
+| `csarron/mdict-analysis` | `e99cfca7a969cc8020d6f92d76c254e075f4110a` | GPLv3 parser header | A (root of the lineage) | MDX + MDD | clean-room behavioral only |
+| `terasum/js-mdict` | `044fbf5101bb491942bac1bfffb39778a84cf84a` | current source AGPL-3.0 | C | MDX + MDD | clean-room behavioral only |
+| `zhansliu/writemdict` | `f0240b30cabd2f0470d3ee1a0641fc7f8c38dcf5` | MIT | W | explicit v1.2 MDX/MDD **writer** | reviewed synthetic/diagnostic oracle; **never** the sole expected-result source (rule 8.1.4) |
+| `ikey4u/wikit` | `f1acb7ae6e75f910ded2f757ee4e9a22df52b87e` | MIT | E | MDX with explicit v1 paths; **no MDD** | oracle plus permissively-licensed cross-check; rule 8.1.2 applies |
+| `xiaoyifang/goldendict-ng` | `9054c3436fc4d7c29ea1a9901fa28ad79362b7ef` | GPLv3+ | B | shared MDX/MDD parser | clean-room behavioral only; same lineage as `goldendict` |
+| `mdict4j` (Codeberg) | `eed1a78b51081684720f1fa50beddfec5f5dd4b6` | GPL-3.0-or-later | D | v1 MDX, but **forces MDD through v2** | clean-room behavioral only; its MDD path is evidence of a *reader's* choice, not of the format |
+| `jeka-kiselyov/mdict` | `77fda616cb9aa0afe06f814c78ecfb4d8fd6a994` | MIT parser text, but **bundled LZO code is GPL** | C | MDX + MDD | not independent of `js-mdict`; treat the bundled LZO as GPL-contaminated and do not read it |
+
+For each row, milestone 1 records: the immutable revision, the exact
+source-file and license-file URLs at that revision, the lineage class and the
+evidence for it, the claimed MDX and MDD support, and the observation method
+used (source reading versus running the tool against a fixture).
+
+Independence budget: the strongest available pairing is **A ∪ B**, optionally
+strengthened by **D** or **E**. `readmdict` + `mdict-parser` + `mdict-analysis`
+together count as **one** observation.
+
+### 8.3 Evidence versus hypotheses
+
+#### Independently reproduced in this repository on 2026-08-11
+
+Reproduced from tracked artifacts, by bounded metadata-only reads. Method:
+filter [`corpus/mdict-org-2026-08-10.acquisition-outcomes.json`](../corpus/mdict-org-2026-08-10.acquisition-outcomes.json)
+(SHA-256 `f19ced0c1b844277689cc723d15a762ea81678d3b4a19ddf5e28fe1af568ea65`,
+verified) to `status == "excluded"` rows whose observer error is
+`Unsupported("MDict format major version other than 2")`, then read only each
+file's four-byte big-endian length prefix and declared UTF-16LE header XML from
+the ignored local `.corpus/` cache.
+
+| Fact | Value |
+| --- | --- |
+| non-v2 MDX rows in the tracked ledger | 453 |
+| total bytes | 2,677,098,909 |
+| all 453 locally present under `.corpus/` | yes |
+| header-read failures | 0 |
+| top-level tag | `Dictionary` × 453 |
+| `GeneratedByEngineVersion` | `1.2` × 453 |
+| `RequiredEngineVersion` | `1.2` × 453 |
+| `Encrypted` | `No` × 453 |
+| `Format` | `Html` × 453 |
+
+Encoding strata (count / bytes):
+
+| Encoding | Files | Bytes |
+| --- | --- | --- |
+| UTF-16 | 207 | 1,519,004,266 |
+| GBK | 167 | 478,677,660 |
+| UTF-8 | 62 | 558,412,728 |
+| ISO8859-1 | 11 | 80,572,016 |
+| BIG5 | 6 | 40,432,239 |
+
+MDD discovery, reproduced from
+[`corpus/mdict-org-2026-08-10.inventory.json`](../corpus/mdict-org-2026-08-10.inventory.json)
+(SHA-256 `51ba61e985e42351ce7a1ee0c7713ac1f9f02284870383a12c3350ad2b5fa74d`,
+verified):
+
+| Fact | Value |
+| --- | --- |
+| direct MDD rows in the snapshot | 335 |
+| advertised bytes | 47,594,522,494 |
+| exact-stem MDD candidates paired with a v1 MDX row | 16 |
+| advertised bytes of those 16 | 59,842,819 |
+| authorized, acquired, or version-inspected | **none** |
+
+#### Carried forward without a tracked artifact — must be re-derived
+
+| Claim | Status |
+| --- | --- |
+| derived v1 subset identity `e73f7e7697062cf4316ffe40af570af135a4a526858823e407bf3e07955d904b` | **not reproduced.** No derivation rule is recorded anywhere in the repository and fourteen plausible record formulations over the 453 rows all produced different digests. Milestone 1 must pin an exact rule, emit a tracked artifact, and re-derive the value |
+| 448 of 453 fit the canonical v1 geometry through exact section EOF | carried forward from a prior session; no tracked artifact |
+| 46,083,934 declared entries; 71,243 key blocks; 179,587 record blocks | carried forward; no tracked artifact |
+| 446 files use LZO for every key and record block | carried forward; no tracked artifact |
+| 2 files contain one or more uncompressed key blocks with LZO records | carried forward; no tracked artifact |
+| no zlib block and no uncompressed record block observed | carried forward; no tracked artifact |
+| 4 files have coherent headers/indexes but truncated record sections | carried forward; retained as a failure class |
+| 1 file's keyword metadata stops fitting the canonical grammar while its record geometry reaches exact EOF | carried forward; stays classified **"corruption versus creator variant unresolved"**. Do not invent a fallback to accept it |
+
+None of the above has decoded a single LZO payload, key, checksum, ordinal,
+duplicate, or record. All of it is geometry.
+
+#### Hypotheses — reader consensus, not yet exercised
+
+Each remains a hypothesis until independently exercised by synthetic fixtures
+(milestone 3) **and** authorized real files (milestone 6).
+
+- v1 numeric fields are unsigned 32-bit big-endian; v2 uses 64-bit.
+- the v1 keyword header is 16 bytes / four `u32` fields: key-block count, entry
+  count, raw key-info size, key-block-data size.
+- v1 omits the v2 key-info decompressed-size field and the keyword-header
+  checksum.
+- v1 keyword metadata is raw/uncompressed.
+- each key metadata row is: `u32` entry count; `u8` first-summary length plus
+  bytes; `u8` last-summary length plus bytes; `u32` compressed size; `u32`
+  decompressed size.
+- v1 summaries have no v2-style terminators.
+- UTF-16 summary lengths count 16-bit units; other encodings count bytes.
+- decoded key rows are a `u32` big-endian record offset followed by a
+  NUL-terminated key.
+- the v1 record header is four `u32` fields.
+- record-index rows are `u32` compressed/decompressed-size pairs, eight bytes
+  each — so the exact-length check is `block_count * 8`, against v2's
+  `block_count * 16`.
+- normal v1 key/record blocks retain the common eight-byte envelope: four-byte
+  compression tag, big-endian ADLER32, then payload.
+- compression tag `01 00 00 00` is raw LZO1X.
+- MDX and MDD share the physical layout; MDD keys are UTF-16LE while payloads
+  remain bytes.
+
+#### Open disagreements and unknowns
+
+1. `GeneratedByEngineVersion` versus `RequiredEngineVersion` as the
+   authoritative dispatch attribute. **Regression-critical:** today's
+   `is_v2()` reads `GeneratedByEngineVersion`, and `RequiredEngineVersion`
+   defaults to it when absent. Changing the attribute changes which files are
+   accepted as v2 and can silently move corpus artifacts between classes.
+   Section 9 gates this.
+2. Missing, malformed, conflicting, or unusual version strings.
+3. Missing `Encoding` defaults: readers disagree between UTF-8 and UTF-16LE.
+   `mdictlib` currently defaults MDX to UTF-8
+   ([`src/format/encoding.rs:21`](../src/format/encoding.rs:21)).
+4. Real versions other than 1.2. All 453 local v1 files declare exactly 1.2, so
+   the local corpus provides **no** evidence about 1.0 or 1.1.
+5. Empty v1 sections (zero key blocks, zero record blocks, zero entries).
+6. v1 encryption flags and passcode behavior. All 453 local files declare
+   `Encrypted=No`, so the local corpus provides **no** v1 encryption evidence.
+7. Whether key-info encryption exists in real v1 files at all.
+8. Real v1 zlib blocks.
+9. Uncompressed v1 record blocks.
+10. Exact LZO termination, checksum, and trailing-input rules.
+11. Records crossing decoded record-block boundaries in v1.
+12. ISO-8859-1 behavior — 11 local files declare it, and it is **not** in
+    `mdictlib`'s supported encoding set today
+    ([`src/format/encoding.rs:8`](../src/format/encoding.rs:8)), so those
+    files would be rejected as `Unsupported("text encoding")` even with a
+    working v1 grammar. Adding it is a separate scoped decision.
+13. Creator-specific variants and malformed historical files.
+
+### 8.4 Milestones
+
+#### Milestone 1 — Evidence matrix
+
+Research and tracking only; no source change.
+
+- Clone and pin every section 8.2 row that is not yet local, at the exact stated
+  revision. Record for each: revision, source-file and license-file URLs at that
+  revision, lineage class and its evidence, claimed MDX/MDD support, and
+  observation method.
+- Resolve the `mdict-cli-rs` anomaly: it is present locally, was not part of the
+  planned reference set, has no license file, and contains no parser. Either
+  review it properly or remove it from the reference directory.
+- Compare at least two genuinely independent readers (lineage A versus B, ideally
+  plus D or E) on every section 8.3 hypothesis. Record agreement, disagreement,
+  and silence separately. Silence is not agreement.
+- Pin an exact, reproducible derivation rule for the v1 subset identity, emit it
+  as a tracked artifact, and re-derive the digest under that rule.
+- Re-derive and track the physical geometry figures currently carried forward
+  without an artifact (448/453, entry/block counts, compression strata,
+  truncation and grammar-mismatch failure classes), with the exact command,
+  host, and toolchain.
+- Classify all 453 MDX rows into: canonical-geometry candidate, truncated,
+  unresolved-grammar, or unsupported-encoding.
+- Establish an authorized v1 **MDD** denominator. The 16 exact-stem candidates
+  are discovery metadata only; a separate explicit local-testing and license
+  review must precede any acquisition.
+
+Exit: every section 8.3 hypothesis carries at least one independent-pair verdict
+or an explicit "no independent evidence" marker; every 453 row has a class; the
+MDD denominator is either authorized and recorded or explicitly recorded as
+still absent.
+
+#### Milestone 2 — Isolate v2
+
+- Create `src/format/common/`, `src/format/v1/`, `src/format/v2/` per section 4.2
+  and move the shared modules, including `src/source.rs`.
+- Move the entire v2 keyword grammar out of `src/format/key_index.rs` into
+  `format::v2::keyword`, including the narrow legacy-v2 variant, and the v2
+  record grammar out of `src/format/record_index.rs` into `format::v2::record`.
+- Move `core::keys::parse_key_block_entries` verbatim into
+  `format::v2::keyword::decode_key_rows` and reach it through `WireOps`.
+- Introduce `format::common::descriptors`, `ValidatedLayout`, `SectionRanges`,
+  `WireOps`, `RetainedBudget`, and the split `key_encoding` /
+  `record_encoding` fields.
+- Delete the duplicated `is_v2()` checks in the two index parsers and leave one
+  private `WireVersion` match in `src/format/mod.rs`. At this milestone the `V1`
+  arm returns the existing `Unsupported` error, so behavior is unchanged.
+- Re-point `src/fuzzing.rs` and the fuzz targets at the moved module paths.
+
+Exit: every existing v2 test, corpus hash, limit, lazy behavior, and benchmark
+is unchanged (section 9), and a public API diff against `v0.1.0` is empty.
+
+#### Milestone 3 — Independent synthetic v1 fixtures
+
+- Build independent v1 MDX **and** MDD fixture encoders alongside the existing
+  v2 `FixtureBuilder` in `tests/support/`.
+- Writer code must not call parser code, and the parser must not call writer
+  code. Checksums and any cryptography in the fixtures are implemented
+  independently, as the v2 fixtures already do.
+- Cover: empty and multiblock sections; duplicate keys; equal record offsets;
+  records crossing decoded record-block boundaries; `none` and LZO compression;
+  every encoding the v1 corpus declares; corruption; truncation; and hostile
+  declarations (counts, sizes, and offsets that overflow or exceed the file).
+- Cross-check a subset against `zhansliu/writemdict` output as a diagnostic
+  oracle, under rule 8.1.4.
+
+Exit: v1 fixtures exist for every hypothesis in section 8.3 and every failure
+class in milestone 1, and each one has a recorded expected outcome derived
+without running `mdictlib`.
+
+#### Milestone 4 — Implement `format::v1`
+
+- Implement only grammar confirmed by milestone 1 and exercised by milestone 3.
+- Widen every checked `u32` into `u64` internal descriptors per section 4.6.
+- Feed the unchanged shared core through `ValidatedLayout`.
+- Anything unconfirmed stays rejected with an existing `Error` variant. No
+  speculative acceptance.
+
+Exit: the shared-core behavioral test suite passes against synthetic v1 and v2
+with the same assertions.
+
+#### Milestone 5 — Safety and fuzzing
+
+Cover: version detection; field widths; arithmetic overflow; summary parsing;
+key and record indexes; LZO; truncation; checksums; limits; whole MDX and MDD
+files; and version fallthrough (a v1-declaring file with v2 bytes and the
+reverse must both fail cleanly and must not retry the other grammar).
+
+Exit: malformed input cannot panic or bypass limits, under AddressSanitizer,
+with the pinned cargo-fuzz toolchain.
+
+#### Milestone 6 — Corpus and differential validation
+
+- Attempt every authorized artifact and retain every outcome, success or not.
+- For accepted artifacts, compare physical keys, record offsets, entry counts,
+  duplicate order, raw lookup results, and complete MDX payload hashes or MDD
+  streamed-span hashes.
+- Where an independent reader can be run on the same authorized artifact, record
+  a differential verdict; where it cannot, say so.
+
+Exit: every accepted artifact has full ordinal, raw-lookup, duplicate, and
+payload/span evidence; every rejected artifact has a structured retained
+classification.
+
+#### Milestone 7 — Documentation and release decision
+
+Update `README.md`, `.codex/STATUS.md`, this roadmap, and `CHANGELOG.md` only
+after the section 9 gates pass. Select a compatible `0.x` release version
+separately. Do not publish, tag, or push without explicit maintainer
+authorization.
+
+### 8.5 Milestone outcomes
+
+| Milestone | Status | Evidence |
+| --- | --- | --- |
+| 1. Evidence matrix | complete | `scripts/corpus/audit-v1.mjs` reproduces the geometry, block totals, compression strata, and all five failure classifications from a reproducible command. The subset-identity digest was re-derived under a rule that is now recorded in the tool itself. `lengyijun/mdict-cli-rs` was confirmed to contain no parser and is excluded. |
+| 2. Isolate v2 | complete | `format::common` / `format::v1` / `format::v2`; one `WireVersion` match; `ValidatedLayout` boundary; `tests/architecture.rs` enforces it. Public API identical to `v0.1.0`; eight v2 corpus artifacts produce byte-identical logical facts against the pre-refactor build. |
+| 3. Synthetic v1 fixtures | complete | `tests/support/v1.rs`, independent of parser code, including an LZO encoder emitting real lookbehind matches. Drives `conformance_v1`, `shared_core_parity`, `hardening_v1`. |
+| 4. Implement `format::v1` | complete | Only evidence-backed grammar. Encryption and ISO8859-1 refused precisely. |
+| 5. Safety and fuzzing | complete | Ten fuzz targets under AddressSanitizer, including `v1_whole_file`, `v1_truncation`, and `version_dispatch`; mutation and truncation sweeps over whole v1 MDX and MDD files. |
+| 6. Corpus and differential validation | complete | 407 of 453 real artifacts fully validated; 46 rejected with retained classifications; two independent observations agree on all 453. Differential against one independent lineage with zero unexplained disagreements. |
+| 7. MDD validation, documentation, release decision | MDD and docs complete; release **not** selected | README, STATUS, this roadmap, `CHANGELOG.md`, and crate rustdoc updated. Release version deliberately not chosen. |
+
+### 8.6 What was learned that changed the plan
+
+- The **derived subset identity carried in the previous plan was not
+  reproducible** and has been replaced by a digest computed under a rule the
+  tooling records: SHA-256 over sorted `<sha256>\t<bytes>\t<sourcePath>\n`
+  records. The current value is
+  `7b841b9191420684c3f0275007e0087068bbe654454f957d60059ffbefc4f1ed`.
+- Every hypothesis in section 8.3 that the corpus could exercise was
+  **confirmed**: four-`u32` keyword header, raw keyword metadata, one-byte
+  unit-counted summary lengths without terminators, `u32` key-row offsets, the
+  four-`u32` record header, eight-byte record-index rows, and the shared
+  eight-byte envelope with big-endian ADLER32.
+- The key-row grammar was additionally confirmed **against raw bytes** using
+  the two artifacts that store key blocks uncompressed, so it does not rest on
+  the LZO decoder being correct.
+- `KeyRowContext` does **not** need the limits or memory budget: the block's
+  entry count is already bounded at parse time and its decoded size is charged
+  by the caller. The struct was trimmed accordingly.
+- Splitting `key_encoding` from `record_encoding` was a behavioral no-op for
+  version 2, as predicted, and is what lets MDD express UTF-16LE keys with
+  opaque payloads without a container-kind fork in the core.
+
+## 9. Required Regression And Exit Gates
+
+All gates below were run on 2026-08-11. Their status is recorded inline.
+
+### Structural gates (mechanically checkable)
+
+All are enforced by `tests/architecture.rs` and **pass**.
+
+| Gate | Check |
+| --- | --- |
+| one dispatch point | `WireVersion` appears in exactly one file, `src/format/mod.rs`, and is matched exactly once |
+| no version leakage into the core | no occurrence of `WireVersion`, `v1`, or `v2` as an identifier, import, or message in `src/core/`, `src/mdx.rs`, `src/mdd.rs` |
+| grammar isolation | `format::v1` and `format::v2` contain no import of `crate::core`, `crate::mdx`, `crate::mdd`, or each other |
+| no version branch on hot paths | lookup, iteration, ordinal access, record decoding, and MDD streaming contain no version conditional |
+| no dynamic dispatch | no `dyn` and no trait object on the open or decode path |
+| one shared core | one `MdictFile`; no v1-specific MDX or MDD core |
+| no conversion | no code path rewrites v1 bytes into a v2 shape |
+| no cross-version retry | a grammar failure never re-enters the other grammar |
+| laziness preserved | key and record blocks are still decoded on demand, with the same cache behavior |
+| no `unsafe` | unchanged |
+
+### Behavioral gates
+
+| Gate | Status |
+| --- | --- |
+| existing v2 tests pass unchanged (default, all-features, no-default-features, `conformance_v2 --no-default-features`) | pass |
+| existing v2 corpus logical facts unchanged | pass — eight artifacts byte-identical against the `1b3f6bb` build |
+| limits and `MemoryUsage` unchanged for v2 | pass |
+| the same shared-core tests run against synthetic v1 and v2 | pass — `tests/shared_core_parity.rs` |
+| every accepted v1 artifact completes ordinal, raw-lookup, duplicate, and payload validation | pass — 407 of 453 |
+| every rejected artifact has a structured retained classification | pass — 46 of 46 |
+| malformed input cannot panic or bypass limits | pass — mutation and truncation sweeps plus ten AddressSanitizer fuzz targets |
+| public API diff against `v0.1.0` is empty | pass — 126 items identical |
+| benchmark baseline within its 2x diagnostic threshold | **not re-measured**; the checked-in baseline predates this work |
+| real v1 MDD validation | pass — 16 of 16 acquired artifacts fully validated |
+
+The original gate list, for reference:
+
+- Existing v2 tests pass unchanged: `cargo test --locked --all-targets`,
+  `--all-features`, and `--test conformance_v2 --no-default-features`.
+- Existing v2 corpus hashes, entry counts, and failure classifications are
+  byte-identical to the 2026-08-10 exhaustive ledger.
+- Existing limits and `MemoryUsage` accounting are unchanged for v2 inputs.
+- The benchmark baseline in `.codex/benchmarks/2026-08-10-macos-arm64.md` holds
+  within its recorded 2x diagnostic threshold on the recorded host.
+- The same shared-core behavioral tests run against synthetic v1 and synthetic
+  v2 with identical assertions.
+- Every accepted v1 artifact completes ordinal, raw-lookup, duplicate, and MDX
+  payload or MDD span/stream validation.
+- Every rejected artifact has a structured retained classification.
+- Malformed input cannot panic or bypass limits.
+- No public API change unless separately approved under the `0.x` policy; a
+  public API diff against `v0.1.0` must be empty.
+
+### Gated decisions
+
+Two decisions may change which files `mdictlib` accepts and must not be made as
+a side effect of refactoring:
+
+1. **Dispatch attribute.** Any change from `GeneratedByEngineVersion` to
+   `RequiredEngineVersion`, or to a combination, requires re-running the
+   exhaustive corpus audit and comparing the full outcome ledger before and
+   after. A change in any artifact's class blocks the change until reviewed.
+2. **ISO-8859-1 support.** Adding it changes the supported-encoding set and
+   affects 11 local v1 files. It is a separate scoped decision with its own
+   fixtures, not part of milestone 4.
+
+## 10. Corpus Provenance And Acquisition Policy
 
 The repository uses deliberately separate corpus states:
 
@@ -295,7 +910,8 @@ and
 `f19ced0c1b844277689cc723d15a762ea81678d3b4a19ddf5e28fe1af568ea65`).
 Count-only bootstrap promoted 792 files with 37,377,272,230 bytes and
 89,051,220 declared entries; its complete outcome denominator retains 453
-non-v2, six summary-decode, and three truncated-record exclusions.
+non-v2, six summary-decode, and three truncated-record exclusions. Those 453
+non-v2 rows are the v1 evidence base described in section 8.3.
 
 The final full run used isolated artifact processes at concurrency 2 with a
 21,600,000-ms timeout on macOS 26.6 / Darwin 25.6 arm64 (T6020), rustc/cargo
@@ -321,6 +937,14 @@ completed the full audit. Exhaustive duplicate checking was changed to validate
 each complete duplicate group once and use logarithmic membership probes, with
 a dedicated large noncontiguous-duplicate regression.
 
+**MDD evidence gap.** No MDD file is present in the reviewed local selection.
+The tracked inventory holds 335 discovery-only MDD URLs, of which 16 are
+exact-stem candidates paired with v1 MDX rows totaling 59,842,819 advertised
+bytes. They are not authorized, acquired, or version-inspected. A separate
+explicit local-testing and license review must precede acquisition. Until it
+happens, every v1 MDD claim in this roadmap rests on synthetic fixtures and
+reader behavior alone.
+
 CI covers schemas, deterministic transformations, bounded local acquisition
 fixtures, manifest parsing, isolated-runner failure handling, and synthetic
 dictionaries. Full remote acquisition and exhaustive corpus validation are
@@ -332,7 +956,7 @@ complete outcome report bound to the catalog identity, artifact denominator,
 and runner identity; it emits a digest-pinned logical-audit TSV only on complete
 success.
 
-## 8. Reproducibility And Performance Policy
+## 11. Reproducibility And Performance Policy
 
 Authorized corpus tests use `MDICT_CORPUS_DIR` plus `mdictlib-corpus.tsv`.
 Version 1 rows declare a normalized relative path, kind, byte count, SHA-256,
@@ -361,7 +985,7 @@ not a cross-machine performance promise. Default limits remain intentionally
 well above the largest observed valid-corpus peak while still bounding hostile
 metadata.
 
-## 9. First-Release Transition (Complete)
+## 12. First-Release Transition (Complete)
 
 The authorized transition completed these external actions:
 
@@ -374,13 +998,16 @@ The authorized transition completed these external actions:
 No parser, test, documentation, benchmark, or package implementation work was
 deferred to the transition.
 
-## 10. Deferred And Out Of Scope
+## 13. Deferred And Out Of Scope
 
-- version 1.x or future-major layouts;
+- future-major layouts beyond version 1 and version 2;
+- ISO-8859-1 text decoding, until separately scoped (section 9);
 - mmap, persistent sidecars, larger/LRU caches, async I/O, or parallel
   decompression until profiling justifies them;
-- writer support, compact-text rewriting, stylesheet expansion, HTML/JS/CSS
-  interpretation, filesystem extraction, and multi-volume discovery policy;
+- writer support in the published crate, compact-text rewriting, stylesheet
+  expansion, HTML/JS/CSS interpretation, filesystem extraction, and
+  multi-volume discovery policy — v1 fixture encoders and any diagnostic
+  converter are test-only and never linked into the library;
 - prefix, completion, fuzzy search, redirects, and duplicate-record merging;
 - host application integration, UI/resource ordering, and rollout policy.
 

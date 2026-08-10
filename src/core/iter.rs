@@ -63,7 +63,7 @@ impl Iterator for KeyIter<'_> {
                 continue;
             }
 
-            let block = &self.file.key_index.blocks[self.block_index];
+            let block = &self.file.layout.key_blocks[self.block_index];
             let result = u64::try_from(self.entry_index)
                 .ok()
                 .and_then(|local| block.entry_start_index.checked_add(local))

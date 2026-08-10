@@ -62,3 +62,24 @@ bench = false
 
 [workspace]
 members = []
+
+[[bin]]
+name = "v1_whole_file"
+path = "fuzz_targets/v1_whole_file.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "v1_truncation"
+path = "fuzz_targets/v1_truncation.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "version_dispatch"
+path = "fuzz_targets/version_dispatch.rs"
+test = false
+doc = false
+bench = false

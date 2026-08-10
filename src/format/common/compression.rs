@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::format::checksum::verify_adler32;
+use crate::format::common::checksum::verify_adler32;
 use crate::limits::{ensure_usize_limit, try_reserve_vec};
 use crate::types::Limits;
 
@@ -148,7 +148,7 @@ pub fn parse_comp_type(bytes: &[u8]) -> Result<CompressionType> {
 pub fn encode_zlib_block(data: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(8 + data.len());
     out.extend_from_slice(&[2, 0, 0, 0]);
-    out.extend_from_slice(&crate::format::checksum::adler32(data).to_be_bytes());
+    out.extend_from_slice(&crate::format::common::checksum::adler32(data).to_be_bytes());
     out.extend_from_slice(&miniz_oxide::deflate::compress_to_vec_zlib(data, 6));
     out
 }
@@ -210,7 +210,7 @@ mod tests {
         let decoded = b"abcabc";
         let mut block = Vec::new();
         block.extend_from_slice(&[1, 0, 0, 0]);
-        block.extend_from_slice(&crate::format::checksum::adler32(decoded).to_be_bytes());
+        block.extend_from_slice(&crate::format::common::checksum::adler32(decoded).to_be_bytes());
         block.extend_from_slice(&payload);
 
         assert_eq!(

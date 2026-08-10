@@ -145,16 +145,16 @@ impl MdictFile {
 
         for block_index in 0..self.key_block_count() {
             let block = self
-                .key_index
-                .blocks
+                .layout
+                .key_blocks
                 .get(block_index)
                 .ok_or(Error::InvalidFormat("key block index out of range"))?;
             let entries = self.decode_key_block(block_index)?;
             for entry in entries.iter() {
-                if entry.record_start > self.record_index.total_decompressed_len {
+                if entry.record_start > self.layout.total_decoded_record_len {
                     return Err(Error::InvalidData(format!(
                         "record start {} exceeds total record bytes {}",
-                        entry.record_start, self.record_index.total_decompressed_len
+                        entry.record_start, self.layout.total_decoded_record_len
                     )));
                 }
                 if let Some(previous) = previous_record_start

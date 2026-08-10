@@ -1,35 +1,45 @@
+//! The version 2 keyword section: a checksummed 44-byte header, a compressed
+//! and optionally encrypted keyword index, and the key blocks it describes.
+//!
+//! This module also owns the version 2 lazy key-row grammar
+//! ([`decode_key_rows`]), which the core reaches only through the statically
+//! selected [`WIRE_OPERATIONS`].
+
 use std::mem;
 use std::sync::Arc;
 
+use super::crypto::{decrypt_keyword_header_block, decrypt_keyword_index_block};
 use crate::error::{Error, Result};
-use crate::format::compression::decode_block;
-use crate::format::crypto::{decrypt_keyword_header_block, decrypt_keyword_index_block};
-use crate::format::cursor::Cursor;
-use crate::format::encoding::TextEncoding;
-use crate::limits::{
-    MemoryBudget, checked_usize, ensure_u64_ceiling, ensure_u64_limit, ensure_usize_limit,
-    try_reserve_vec,
+use crate::format::common::checked::{
+    checked_usize, ensure_u64_ceiling, ensure_u64_limit, ensure_usize_limit,
 };
-use crate::source::FileSource;
+use crate::format::common::compression::decode_block;
+use crate::format::common::cursor::Cursor;
+use crate::format::common::descriptors::{
+    DecodedKeyRow, KeyBlockDescriptor, KeyRowContext, SectionRange, WireOperations,
+};
+use crate::format::common::encoding::TextEncoding;
+use crate::format::common::source::FileSource;
+use crate::limits::{MemoryBudget, try_reserve_vec};
 use crate::types::{Header, Limits, OpenOptions};
 
-#[derive(Debug, Clone)]
-pub struct KeyBlockInfo {
-    pub entry_count: u64,
-    pub entry_start_index: u64,
-    pub first_key: String,
-    pub last_key: String,
-    pub comp_offset: u64,
-    pub comp_size: u64,
-    pub decomp_size: u64,
+/// The version 2 lazy wire operations, selected once during open.
+pub(super) const WIRE_OPERATIONS: WireOperations = WireOperations { decode_key_rows };
+
+/// Exact validated ranges for the three keyword subsections.
+pub(super) struct KeywordSectionRanges {
+    pub(super) header: SectionRange,
+    pub(super) index: SectionRange,
+    pub(super) blocks: SectionRange,
 }
 
-#[derive(Debug, Clone)]
-pub struct KeyIndex {
-    pub num_entries: u64,
-    pub blocks: Vec<KeyBlockInfo>,
-    pub record_section_offset: u64,
-    pub retained_bytes: usize,
+/// The parsed version 2 keyword section.
+pub(super) struct KeywordSection {
+    pub(super) num_entries: u64,
+    pub(super) blocks: Box<[KeyBlockDescriptor]>,
+    pub(super) record_section_offset: u64,
+    pub(super) retained_bytes: usize,
+    pub(super) sections: KeywordSectionRanges,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,20 +48,21 @@ enum KeywordIndexLayout {
     LegacyLittleEndianChecksumWithoutSummaryTerminators,
 }
 
-pub fn parse_key_index(
+/// Parses and validates the whole version 2 keyword section.
+///
+/// # Errors
+///
+/// Returns an error if the keyword header checksum fails under both accepted
+/// byte orders, a declared size exceeds a limit, the index does not describe
+/// exactly the declared blocks, or any block range falls outside the file.
+pub(super) fn parse_keyword_section(
     source: &FileSource,
     header: &Header,
     key_encoding: TextEncoding,
     keyword_section_offset: u64,
     options: &OpenOptions,
     memory: &Arc<MemoryBudget>,
-) -> Result<KeyIndex> {
-    if !header.is_v2() {
-        return Err(Error::Unsupported(
-            "MDict format major version other than 2",
-        ));
-    }
-
+) -> Result<KeywordSection> {
     let _header_memory = memory.reserve(44, "keyword section header")?;
     let mut raw_header =
         source.read_exact_at(keyword_section_offset, 44, "keyword section header")?;
@@ -143,7 +154,7 @@ pub fn parse_key_index(
     let retained_bytes = decoded_summary_bytes
         .checked_add(
             num_blocks
-                .checked_mul(mem::size_of::<KeyBlockInfo>())
+                .checked_mul(mem::size_of::<KeyBlockDescriptor>())
                 .ok_or(Error::InvalidFormat("keyword metadata size overflow"))?,
         )
         .ok_or(Error::InvalidFormat("keyword metadata size overflow"))?;
@@ -193,11 +204,16 @@ pub fn parse_key_index(
         source.ensure_range(block.comp_offset, block.comp_size, "keyword block")?;
     }
 
-    Ok(KeyIndex {
+    Ok(KeywordSection {
         num_entries,
         record_section_offset,
-        blocks,
+        blocks: blocks.into_boxed_slice(),
         retained_bytes,
+        sections: KeywordSectionRanges {
+            header: SectionRange::new(keyword_section_offset, 44),
+            index: SectionRange::new(key_index_offset, key_index_comp_len),
+            blocks: SectionRange::new(key_blocks_offset, key_blocks_len),
+        },
     })
 }
 
@@ -205,7 +221,7 @@ fn detect_keyword_index_layout(
     header: &[u8],
     checksum_bytes: [u8; 4],
 ) -> Result<KeywordIndexLayout> {
-    let actual = crate::format::checksum::adler32(header);
+    let actual = crate::format::common::checksum::adler32(header);
     let canonical_checksum = u32::from_be_bytes(checksum_bytes);
     if actual == canonical_checksum {
         return Ok(KeywordIndexLayout::Canonical);
@@ -249,7 +265,7 @@ fn validate_keyword_header_counts(
 
     let num_blocks = checked_usize(num_blocks, "keyword block count")?;
     let metadata_bytes = num_blocks
-        .checked_mul(mem::size_of::<KeyBlockInfo>())
+        .checked_mul(mem::size_of::<KeyBlockDescriptor>())
         .ok_or(Error::InvalidFormat("keyword block metadata size overflow"))?;
     ensure_usize_limit(
         "keyword_block_metadata_bytes",
@@ -285,7 +301,7 @@ fn parse_keyword_index_entries(
     layout: KeywordIndexLayout,
     key_blocks_offset: u64,
     limits: &Limits,
-) -> Result<Vec<KeyBlockInfo>> {
+) -> Result<Vec<KeyBlockDescriptor>> {
     let minimum_len = num_blocks
         .checked_mul(checked_usize(
             minimum_keyword_index_entry_bytes(encoding, layout)?,
@@ -357,7 +373,7 @@ fn parse_keyword_index_entries(
             .checked_add(entry_count)
             .ok_or(Error::InvalidFormat("keyword entry index overflow"))?;
 
-        blocks.push(KeyBlockInfo {
+        blocks.push(KeyBlockDescriptor {
             entry_count,
             entry_start_index,
             first_key,
@@ -431,6 +447,65 @@ fn validate_key_block_sizes(
     Ok(())
 }
 
+/// Decodes one whole decompressed version 2 key block into physical rows.
+///
+/// Each row is an eight-byte big-endian record offset followed by an
+/// encoding-terminated key. The block must contain exactly the number of
+/// entries its keyword metadata declared, with no trailing bytes.
+///
+/// # Errors
+///
+/// Returns an error if the block is truncated, declares more or fewer entries
+/// than its metadata, contains a record offset beyond the decoded record
+/// stream, decreases its record offsets, or holds undecodable key text.
+fn decode_key_rows(bytes: &[u8], context: &KeyRowContext) -> Result<Vec<DecodedKeyRow>> {
+    let mut cursor = Cursor::new(bytes);
+    let expected_count = checked_usize(context.expected_entries, "decoded key entry count")?;
+    let mut entries = Vec::new();
+    try_reserve_vec(&mut entries, expected_count, "decoded key entries")?;
+    let mut previous_record_start = None;
+    while !cursor.is_empty() {
+        if entries.len() == expected_count {
+            return Err(Error::InvalidData(format!(
+                "key block contains data after its declared {expected_count} entries"
+            )));
+        }
+        let record_start = cursor.read_u64_be("key block record offset")?;
+        if record_start > context.total_decoded_record_len {
+            return Err(Error::InvalidData(format!(
+                "record start {record_start} exceeds total record bytes {}",
+                context.total_decoded_record_len
+            )));
+        }
+        if let Some(previous) = previous_record_start
+            && previous > record_start
+        {
+            return Err(Error::InvalidData(format!(
+                "record starts decrease inside key block from {previous} to {record_start}"
+            )));
+        }
+        previous_record_start = Some(record_start);
+        let start = cursor.offset();
+        let (key_bytes, next_offset) =
+            context
+                .encoding
+                .split_terminated(bytes, start, "key block entry key")?;
+        let key = context.encoding.decode(key_bytes, "key block entry key")?;
+        let key_len = next_offset
+            .checked_sub(start)
+            .ok_or(Error::InvalidFormat("key block cursor underflow"))?;
+        cursor.read_bytes(key_len, "key block entry key bytes")?;
+        entries.push(DecodedKeyRow { key, record_start });
+    }
+    if entries.len() != expected_count {
+        return Err(Error::InvalidData(format!(
+            "key block entry count mismatch: expected {expected_count}, decoded {}",
+            entries.len()
+        )));
+    }
+    Ok(entries)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -442,7 +517,7 @@ mod tests {
             0xcc, 0xde, 0x76, 0x81, 0x21, 0xb5, 0x05, 0x43, 0x33, 0xb7, 0x29, 0x65, 0x5c, 0xf8,
             0xc0, 0x1f, 0xbc, 0x66, 0x17, 0xe3, 0x48, 0x9f, 0xd1, 0x63, 0x5b, 0x91,
         ];
-        let checksum_bytes = crate::format::checksum::adler32(&header).to_be_bytes();
+        let checksum_bytes = crate::format::common::checksum::adler32(&header).to_be_bytes();
         assert_eq!(checksum_bytes, [0xe4, 0x15, 0x15, 0xe4]);
         assert_eq!(
             detect_keyword_index_layout(&header, checksum_bytes).unwrap(),

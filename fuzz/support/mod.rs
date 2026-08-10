@@ -434,3 +434,209 @@ fn adler32(bytes: &[u8]) -> u32 {
     }
     (second << 16) | first
 }
+
+// ---------------------------------------------------------------------------
+// Version 1 fixtures
+// ---------------------------------------------------------------------------
+
+/// Which wire grammar a fixture is written in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wire {
+    V1,
+    V2,
+}
+
+/// Builds a structurally valid version 1 fixture with the same logical content
+/// as [`fixture`], so the two grammars can be fuzzed against equal baselines.
+pub fn fixture_v1(kind: Kind) -> Fixture {
+    let keys = match kind {
+        Kind::Mdx => ["alpha", "duplicate", "duplicate", "empty", "omega", "zulu"],
+        Kind::Mdd => [
+            "\\alpha.bin",
+            "\\duplicate.bin",
+            "\\duplicate.bin",
+            "\\empty.bin",
+            "\\omega.bin",
+            "\\zulu.bin",
+        ],
+    };
+    let records: [&[u8]; 6] = [b"A", b"BB", b"CCC", b"", b"DD", b"E"];
+    let record_data = records.concat();
+    let record_starts = records
+        .iter()
+        .scan(0u32, |offset, record| {
+            let start = *offset;
+            *offset += record.len() as u32;
+            Some(start)
+        })
+        .collect::<Vec<_>>();
+
+    let key_block_counts = [2usize, 2, 2];
+    let mut key_payloads = Vec::new();
+    let mut relative_record_offsets = Vec::new();
+    let mut summaries = Vec::new();
+    let mut entry_index = 0usize;
+    for count in key_block_counts {
+        let end = entry_index + count;
+        let mut payload = Vec::new();
+        let mut offsets = Vec::new();
+        for index in entry_index..end {
+            offsets.push(payload.len());
+            put_u32_be(&mut payload, record_starts[index]);
+            payload.extend_from_slice(&encode_key(kind, keys[index]));
+            payload.extend(std::iter::repeat_n(0, key_unit_size(kind)));
+        }
+        key_payloads.push(payload);
+        relative_record_offsets.push(offsets);
+        summaries.push((keys[entry_index], keys[end - 1]));
+        entry_index = end;
+    }
+    let key_blocks = key_payloads
+        .iter()
+        .map(|payload| uncompressed_block(payload))
+        .collect::<Vec<_>>();
+
+    let record_payloads = split_bytes(&record_data, &[2, 3, 4]);
+    let record_blocks = record_payloads
+        .iter()
+        .map(|payload| uncompressed_block(payload))
+        .collect::<Vec<_>>();
+
+    // Raw keyword metadata: no envelope, one-byte summary lengths, no
+    // terminators, u32 sizes.
+    let mut key_info = Vec::new();
+    for index in 0..key_blocks.len() {
+        put_u32_be(&mut key_info, 2);
+        put_v1_summary(&mut key_info, kind, summaries[index].0);
+        put_v1_summary(&mut key_info, kind, summaries[index].1);
+        put_u32_be(&mut key_info, key_blocks[index].len() as u32);
+        put_u32_be(&mut key_info, key_payloads[index].len() as u32);
+    }
+
+    let header_xml = match kind {
+        Kind::Mdx => concat!(
+            "<Dictionary GeneratedByEngineVersion=\"1.2\" ",
+            "RequiredEngineVersion=\"1.2\" Encoding=\"UTF-8\" ",
+            "KeyCaseSensitive=\"No\" StripKey=\"No\"/>"
+        ),
+        Kind::Mdd => concat!(
+            "<Library_Data GeneratedByEngineVersion=\"1.2\" ",
+            "RequiredEngineVersion=\"1.2\" ",
+            "KeyCaseSensitive=\"No\" StripKey=\"No\"/>"
+        ),
+    };
+    let header_xml = utf16le(header_xml);
+
+    let mut bytes = Vec::new();
+    put_u32_be(&mut bytes, header_xml.len() as u32);
+    bytes.extend_from_slice(&header_xml);
+    put_u32_le(&mut bytes, adler32(&header_xml));
+
+    let keyword_header_start = bytes.len();
+    put_u32_be(&mut bytes, key_blocks.len() as u32);
+    put_u32_be(&mut bytes, keys.len() as u32);
+    put_u32_be(&mut bytes, key_info.len() as u32);
+    put_u32_be(
+        &mut bytes,
+        key_blocks.iter().map(Vec::len).sum::<usize>() as u32,
+    );
+    let keyword_header_range = keyword_header_start..bytes.len();
+
+    let key_index_start = bytes.len();
+    bytes.extend_from_slice(&key_info);
+    let key_index_range = key_index_start..bytes.len();
+
+    let mut key_block_ranges = Vec::new();
+    let mut record_offset_positions = Vec::new();
+    for (index, block) in key_blocks.iter().enumerate() {
+        let start = bytes.len();
+        bytes.extend_from_slice(block);
+        record_offset_positions.extend(
+            relative_record_offsets[index]
+                .iter()
+                .map(|relative| start + 8 + relative),
+        );
+        key_block_ranges.push(start..bytes.len());
+    }
+
+    let record_header_start = bytes.len();
+    put_u32_be(&mut bytes, record_blocks.len() as u32);
+    put_u32_be(&mut bytes, keys.len() as u32);
+    put_u32_be(&mut bytes, (record_blocks.len() * 8) as u32);
+    put_u32_be(
+        &mut bytes,
+        record_blocks.iter().map(Vec::len).sum::<usize>() as u32,
+    );
+    let record_header_range = record_header_start..bytes.len();
+
+    let record_index_start = bytes.len();
+    for (payload, block) in record_payloads.iter().zip(&record_blocks) {
+        put_u32_be(&mut bytes, block.len() as u32);
+        put_u32_be(&mut bytes, payload.len() as u32);
+    }
+    let record_index_range = record_index_start..bytes.len();
+
+    let mut record_block_ranges = Vec::new();
+    for block in &record_blocks {
+        let start = bytes.len();
+        bytes.extend_from_slice(block);
+        record_block_ranges.push(start..bytes.len());
+    }
+
+    Fixture {
+        kind,
+        bytes,
+        layout: Layout {
+            keyword_header: keyword_header_range,
+            key_index: key_index_range,
+            key_blocks: key_block_ranges,
+            record_header: record_header_range,
+            record_index: record_index_range,
+            record_blocks: record_block_ranges,
+            record_offsets: record_offset_positions,
+        },
+    }
+}
+
+/// Builds a fixture in the requested wire grammar.
+pub fn fixture_for(wire: Wire, kind: Kind) -> Fixture {
+    match wire {
+        Wire::V1 => fixture_v1(kind),
+        Wire::V2 => fixture(kind),
+    }
+}
+
+/// Rewrites the declared engine version in a fixture's header XML.
+///
+/// The header XML is UTF-16LE and its ADLER32 must be refreshed, so this also
+/// exercises the header checksum path.
+pub fn set_declared_major_version(fixture: &mut Fixture, major: u8) {
+    let xml_len = u32::from_be_bytes([
+        fixture.bytes[0],
+        fixture.bytes[1],
+        fixture.bytes[2],
+        fixture.bytes[3],
+    ]) as usize;
+    let xml_range = 4..4 + xml_len;
+    // The major digit is the first UTF-16 unit after `EngineVersion="`.
+    let needle = utf16le("EngineVersion=\"");
+    let mut cursor = xml_range.start;
+    while cursor + needle.len() + 2 <= xml_range.end {
+        if fixture.bytes[cursor..cursor + needle.len()] == needle[..] {
+            let digit = cursor + needle.len();
+            fixture.bytes[digit] = b'0' + major;
+            fixture.bytes[digit + 1] = 0;
+        }
+        cursor += 2;
+    }
+    let checksum = adler32(&fixture.bytes[xml_range]);
+    let checksum_offset = 4 + xml_len;
+    fixture.bytes[checksum_offset..checksum_offset + 4].copy_from_slice(&checksum.to_le_bytes());
+}
+
+fn put_v1_summary(output: &mut Vec<u8>, kind: Kind, summary: &str) {
+    let encoded = encode_key(kind, summary);
+    output.push((encoded.len() / key_unit_size(kind)) as u8);
+    output.extend_from_slice(&encoded);
+    // Version 1 summaries carry no terminator.
+}

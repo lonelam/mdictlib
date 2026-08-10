@@ -4,16 +4,13 @@ use std::sync::Arc;
 
 use super::{CachedFailure, CachedValue, MdictFile};
 use crate::error::{Error, Result};
-use crate::format::compression::decode_block;
-use crate::format::cursor::Cursor;
+use crate::format::common::compression::decode_block;
+use crate::format::common::descriptors::{DecodedKeyRow, KeyRowContext};
 use crate::limits::{MemoryReservation, checked_usize, try_clone_string, try_reserve_vec};
 use crate::types::{KeyEntry, KeyOrdinal};
 
-#[derive(Debug, Clone)]
-pub(super) struct DecodedKeyEntry {
-    pub(super) key: String,
-    pub(super) record_start: u64,
-}
+/// One decoded key row, as produced by whichever wire grammar this file uses.
+pub(super) type DecodedKeyEntry = DecodedKeyRow;
 
 #[derive(Debug)]
 pub(super) struct DecodedKeyBlock {
@@ -74,8 +71,8 @@ impl MdictFile {
                         "key ordinal not covered by key blocks",
                     ))?;
             let block = self
-                .key_index
-                .blocks
+                .layout
+                .key_blocks
                 .get(block_index)
                 .ok_or(Error::InvalidFormat("key block index out of range"))?;
             let entry_offset = ordinal_value
@@ -129,8 +126,8 @@ impl MdictFile {
                     "key ordinal not covered by key blocks",
                 ))?;
         let block = self
-            .key_index
-            .blocks
+            .layout
+            .key_blocks
             .get(block_index)
             .ok_or(Error::InvalidFormat("key block index out of range"))?;
         let entry_offset = ordinal_value
@@ -167,7 +164,7 @@ impl MdictFile {
         }
 
         let result = (|| {
-            if self.key_index.blocks.get(index).is_none() {
+            if self.layout.key_blocks.get(index).is_none() {
                 return Err(Error::InvalidFormat("key block index out of range"));
             }
             let previous_last = if index == 0 {
@@ -226,14 +223,14 @@ impl MdictFile {
 
     fn decode_key_block_uncached(&self, index: usize) -> Result<Arc<DecodedKeyBlock>> {
         let block = self
-            .key_index
-            .blocks
+            .layout
+            .key_blocks
             .get(index)
             .ok_or(Error::InvalidFormat("key block index out of range"))?;
         let comp_size = checked_usize(block.comp_size, "key block compressed length")?;
         let decomp_size = checked_usize(block.decomp_size, "key block decompressed length")?;
         let entry_count = checked_usize(block.entry_count, "key block entry count")?;
-        let decoded_text_bytes = self.key_encoding.max_decoded_len(decomp_size)?;
+        let decoded_text_bytes = self.layout.key_encoding.max_decoded_len(decomp_size)?;
         let retained_bytes = decoded_text_bytes
             .checked_add(
                 entry_count
@@ -249,7 +246,14 @@ impl MdictFile {
             .source
             .read_exact_at(block.comp_offset, comp_size, "key block")?;
         let decoded = decode_block("key block", &block_bytes, decomp_size, &self.limits)?;
-        let parsed = self.parse_key_block_entries(&decoded, block.entry_count)?;
+        // The wire grammar for a key row was selected once during open. The
+        // core never learns which one it is, and never branches per entry.
+        let context = KeyRowContext {
+            encoding: self.layout.key_encoding,
+            expected_entries: block.entry_count,
+            total_decoded_record_len: self.layout.total_decoded_record_len,
+        };
+        let parsed = (self.layout.wire.decode_key_rows)(&decoded, &context)?;
         let first = parsed
             .first()
             .ok_or(Error::InvalidFormat("empty decoded key block"))?;
@@ -270,57 +274,6 @@ impl MdictFile {
         Ok(entries)
     }
 
-    fn parse_key_block_entries(
-        &self,
-        bytes: &[u8],
-        expected_count: u64,
-    ) -> Result<Vec<DecodedKeyEntry>> {
-        let mut cursor = Cursor::new(bytes);
-        let expected_count = checked_usize(expected_count, "decoded key entry count")?;
-        let mut entries = Vec::new();
-        try_reserve_vec(&mut entries, expected_count, "decoded key entries")?;
-        let mut previous_record_start = None;
-        while !cursor.is_empty() {
-            if entries.len() == expected_count {
-                return Err(Error::InvalidData(format!(
-                    "key block contains data after its declared {expected_count} entries"
-                )));
-            }
-            let record_start = cursor.read_u64_be("key block record offset")?;
-            if record_start > self.record_index.total_decompressed_len {
-                return Err(Error::InvalidData(format!(
-                    "record start {record_start} exceeds total record bytes {}",
-                    self.record_index.total_decompressed_len
-                )));
-            }
-            if let Some(previous) = previous_record_start
-                && previous > record_start
-            {
-                return Err(Error::InvalidData(format!(
-                    "record starts decrease inside key block from {previous} to {record_start}"
-                )));
-            }
-            previous_record_start = Some(record_start);
-            let start = cursor.offset();
-            let (key_bytes, next_offset) =
-                self.key_encoding
-                    .split_terminated(bytes, start, "key block entry key")?;
-            let key = self.key_encoding.decode(key_bytes, "key block entry key")?;
-            let key_len = next_offset
-                .checked_sub(start)
-                .ok_or(Error::InvalidFormat("key block cursor underflow"))?;
-            cursor.read_bytes(key_len, "key block entry key bytes")?;
-            entries.push(DecodedKeyEntry { key, record_start });
-        }
-        if entries.len() != expected_count {
-            return Err(Error::InvalidData(format!(
-                "key block entry count mismatch: expected {expected_count}, decoded {}",
-                entries.len()
-            )));
-        }
-        Ok(entries)
-    }
-
     fn key_summary_matches(&self, decoded_key: &str, index_summary: &str) -> Result<bool> {
         let decoded_len = self.normalizer.normalized_len(decoded_key)?;
         let summary_len = self.normalizer.normalized_len(index_summary)?;
@@ -334,7 +287,7 @@ impl MdictFile {
     }
 
     fn find_key_block_by_ordinal(&self, ordinal: u64) -> Result<Option<usize>> {
-        let blocks = &self.key_index.blocks;
+        let blocks = &self.layout.key_blocks;
         let mut left = 0usize;
         let mut right = blocks.len();
         while left < right {

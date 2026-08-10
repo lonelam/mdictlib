@@ -7,6 +7,17 @@
 //! before header-normalized fallback, and MDD resources can be streamed through
 //! source-bound spans. Per-open limits bound untrusted input and parser work.
 //!
+//! # Wire versions
+//!
+//! MDict major versions 1 and 2 are both read through this API. The version is
+//! resolved once, from the header, and selects one grammar; it never reaches
+//! lookup, iteration, ordinal access, record decoding, or MDD streaming. A file
+//! that fails one grammar is never retried under the other.
+//!
+//! Version 1 support covers unencrypted files using uncompressed or LZO blocks.
+//! Encrypted version 1 files and the ISO8859-1 text label are refused with a
+//! precise error rather than parsed speculatively.
+//!
 //! Version `0.1.0` is the first public release of `mdictlib`.
 
 #![forbid(unsafe_code)]
@@ -20,7 +31,6 @@ mod limits;
 mod lookup;
 mod mdd;
 mod mdx;
-mod source;
 mod types;
 
 #[cfg(fuzzing)]

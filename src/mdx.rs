@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::core::{MdictFile, RecordDescriptor, RecordIter};
 use crate::error::Result;
-use crate::format::encoding::TextEncoding;
+use crate::format::TextEncoding;
 use crate::lookup::KeyMatches;
 use crate::types::{ContainerKind, Header, KeyEntry, KeyOrdinal, MemoryUsage, OpenOptions};
 
@@ -216,7 +216,7 @@ impl MdxFile {
         let bytes = self
             .inner
             .read_record_span(descriptor.start, descriptor.end)?;
-        let text = decode_record_text(self.inner.text_encoding(), &bytes)?;
+        let text = decode_record_text(self.inner.record_text_encoding()?, &bytes)?;
         Ok(MdxEntry::new(descriptor.key, text))
     }
 }

@@ -1,63 +1,47 @@
+//! The version 2 record section: a 32-byte header of four 64-bit fields, a
+//! flat index of 16-byte compressed/decompressed size pairs, and the record
+//! blocks they describe.
+
 use std::mem;
 use std::sync::Arc;
 
 use crate::error::{Error, Result};
-use crate::format::cursor::Cursor;
-use crate::limits::{
-    MemoryBudget, checked_usize, ensure_u64_limit, ensure_usize_limit, try_reserve_vec,
-};
-use crate::source::FileSource;
-use crate::types::{Header, Limits};
+use crate::format::common::checked::{checked_usize, ensure_u64_limit, ensure_usize_limit};
+use crate::format::common::cursor::Cursor;
+use crate::format::common::descriptors::{RecordBlockDescriptor, SectionRange};
+use crate::format::common::source::FileSource;
+use crate::limits::{MemoryBudget, try_reserve_vec};
+use crate::types::Limits;
 
-#[derive(Debug, Clone)]
-pub struct RecordBlockInfo {
-    pub comp_offset: u64,
-    pub comp_size: u64,
-    pub decomp_offset: u64,
-    pub decomp_size: u64,
+/// Exact validated ranges for the three record subsections.
+pub(super) struct RecordSectionRanges {
+    pub(super) header: SectionRange,
+    pub(super) index: SectionRange,
+    pub(super) blocks: SectionRange,
 }
 
-#[derive(Debug, Clone)]
-pub struct RecordIndex {
-    pub num_entries: u64,
-    pub total_decompressed_len: u64,
-    pub blocks: Vec<RecordBlockInfo>,
-    pub retained_bytes: usize,
+/// The parsed version 2 record section.
+pub(super) struct RecordSection {
+    pub(super) num_entries: u64,
+    pub(super) total_decompressed_len: u64,
+    pub(super) blocks: Box<[RecordBlockDescriptor]>,
+    pub(super) retained_bytes: usize,
+    pub(super) sections: RecordSectionRanges,
 }
 
-impl RecordIndex {
-    pub fn find_block(&self, record_offset: u64) -> Option<usize> {
-        let mut left = 0usize;
-        let mut right = self.blocks.len();
-        while left < right {
-            let mid = (left + right) / 2;
-            let block = &self.blocks[mid];
-            let end = block.decomp_offset.checked_add(block.decomp_size)?;
-            if record_offset < block.decomp_offset {
-                right = mid;
-            } else if record_offset >= end {
-                left = mid + 1;
-            } else {
-                return Some(mid);
-            }
-        }
-        None
-    }
-}
-
-pub fn parse_record_index(
+/// Parses and validates the whole version 2 record section.
+///
+/// # Errors
+///
+/// Returns an error if the index length is not exactly `block_count * 16`, a
+/// declared size exceeds a limit, the block ranges do not exactly cover the
+/// declared section, or any range falls outside the file.
+pub(super) fn parse_record_section(
     source: &FileSource,
-    header: &Header,
     record_section_offset: u64,
     limits: &Limits,
     memory: &Arc<MemoryBudget>,
-) -> Result<RecordIndex> {
-    if !header.is_v2() {
-        return Err(Error::Unsupported(
-            "MDict format major version other than 2",
-        ));
-    }
-
+) -> Result<RecordSection> {
     let _header_memory = memory.reserve(32, "record section header")?;
     let header_bytes = source.read_exact_at(record_section_offset, 32, "record section header")?;
     let mut cursor = Cursor::new(&header_bytes);
@@ -79,7 +63,7 @@ pub fn parse_record_index(
 
     let _index_memory = memory.reserve(index_len_usize, "record block index")?;
     let retained_bytes = num_blocks
-        .checked_mul(mem::size_of::<RecordBlockInfo>())
+        .checked_mul(mem::size_of::<RecordBlockDescriptor>())
         .ok_or(Error::InvalidFormat("record metadata size overflow"))?;
     let _metadata_memory = memory.reserve(retained_bytes, "record block metadata")?;
     let index_bytes = source.read_exact_at(index_offset, index_len_usize, "record block index")?;
@@ -101,7 +85,7 @@ pub fn parse_record_index(
         let next_decomp_offset = decomp_offset
             .checked_add(decomp_size)
             .ok_or(Error::InvalidFormat("record block offset overflow"))?;
-        blocks.push(RecordBlockInfo {
+        blocks.push(RecordBlockDescriptor {
             comp_offset,
             comp_size,
             decomp_offset,
@@ -134,11 +118,16 @@ pub fn parse_record_index(
         ));
     }
 
-    Ok(RecordIndex {
+    Ok(RecordSection {
         num_entries,
         total_decompressed_len: decomp_offset,
-        blocks,
+        blocks: blocks.into_boxed_slice(),
         retained_bytes,
+        sections: RecordSectionRanges {
+            header: SectionRange::new(record_section_offset, 32),
+            index: SectionRange::new(index_offset, index_len),
+            blocks: SectionRange::new(blocks_offset, blocks_len),
+        },
     })
 }
 
@@ -160,7 +149,7 @@ fn validate_record_header(
     let index_len = checked_usize(index_len, "record index length")?;
     let num_blocks = checked_usize(num_blocks, "record block count")?;
     let metadata_bytes = num_blocks
-        .checked_mul(mem::size_of::<RecordBlockInfo>())
+        .checked_mul(mem::size_of::<RecordBlockDescriptor>())
         .ok_or(Error::InvalidFormat("record block metadata size overflow"))?;
     ensure_usize_limit(
         "record_block_metadata_bytes",

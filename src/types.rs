@@ -238,14 +238,6 @@ impl Header {
     pub fn creation_date(&self) -> Option<&str> {
         self.creation_date.as_deref()
     }
-
-    pub(crate) fn is_v2(&self) -> bool {
-        self.generated_by_engine_version
-            .split('.')
-            .next()
-            .and_then(|value| value.parse::<u32>().ok())
-            == Some(2)
-    }
 }
 
 /// Passcode material for dictionaries with an encrypted keyword header.

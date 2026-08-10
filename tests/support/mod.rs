@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 
+pub mod behavior;
 mod crypto;
+pub mod v1;
 
 use std::fs::{self, OpenOptions as FsOpenOptions};
 use std::ops::Range;

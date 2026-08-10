@@ -4,7 +4,8 @@ use std::sync::Arc;
 use super::keys::{DecodedKeyBlock, KeyBlockHit};
 use super::{CachedFailure, CachedValue, MdictFile};
 use crate::error::{Error, Result};
-use crate::format::compression::decode_block;
+use crate::format::common::compression::decode_block;
+use crate::format::common::descriptors::find_record_block;
 use crate::limits::{
     MemoryReservation, checked_u64, checked_usize, try_clone_string, try_reserve_vec,
 };
@@ -68,8 +69,8 @@ impl MdictFile {
             entries,
         } = hit;
         let block = self
-            .key_index
-            .blocks
+            .layout
+            .key_blocks
             .get(block_index)
             .ok_or(Error::InvalidFormat("key block index out of range"))?;
         let entry_start_index = block.entry_start_index;
@@ -93,7 +94,7 @@ impl MdictFile {
                 .ok_or(Error::InvalidFormat("empty key block"))?
                 .record_start
         } else {
-            self.record_index.total_decompressed_len
+            self.layout.total_decoded_record_len
         };
         if end < start {
             return Err(Error::InvalidData(format!(
@@ -127,13 +128,10 @@ impl MdictFile {
 
         let mut cursor = start;
         while cursor < end {
-            let block_index = self
-                .record_index
-                .find_block(cursor)
-                .ok_or(Error::InvalidFormat(
-                    "record offset not covered by record blocks",
-                ))?;
-            let block = &self.record_index.blocks[block_index];
+            let block_index = find_record_block(&self.layout.record_blocks, cursor).ok_or(
+                Error::InvalidFormat("record offset not covered by record blocks"),
+            )?;
+            let block = &self.layout.record_blocks[block_index];
             let decoded = self.decode_record_block(block_index)?;
             let local_start = checked_usize(
                 cursor
@@ -202,8 +200,8 @@ impl MdictFile {
 
     fn decode_record_block_uncached(&self, index: usize) -> Result<Arc<DecodedRecordBlock>> {
         let block = self
-            .record_index
-            .blocks
+            .layout
+            .record_blocks
             .get(index)
             .ok_or(Error::InvalidFormat("record block index out of range"))?;
         let comp_size = checked_usize(block.comp_size, "record block compressed length")?;
@@ -228,7 +226,7 @@ impl MdictFile {
         let len = end
             .checked_sub(start)
             .ok_or(Error::InvalidFormat("record range overflow"))?;
-        if end > self.record_index.total_decompressed_len {
+        if end > self.layout.total_decoded_record_len {
             return Err(Error::InvalidFormat("record range exceeds record data"));
         }
         Ok(len)

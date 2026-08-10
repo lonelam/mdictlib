@@ -21,22 +21,57 @@ dictionaries and `.mdd` resource dictionaries.
 
 ## Supported Scope
 
-- MDict major version 2 MDX and MDD sections
+Both MDict major versions are read through the same public API, the same
+shared core, and the same limits. The wire version is detected once, from the
+header, and never influences lookup, iteration, ordinal access, record
+decoding, or MDD streaming.
+
+Common to both versions:
+
 - UTF-8, UTF-16LE, GBK/GB2312, GB18030, and Big5 text decoding
-- uncompressed and zlib blocks
+- lazy iteration, physical-ordinal access, and duplicate-aware lookup
+- the shared eight-byte block envelope with big-endian ADLER32
 - optional pure-Rust LZO through the `lzo` feature
+
+### MDict major version 2
+
+- MDX and MDD sections
+- uncompressed, zlib, and LZO blocks
 - keyword-index encryption
 - passcode-protected keyword-header encryption
 - a narrowly identified legacy v2 keyword-index layout: an exact
   little-endian keyword-header ADLER32 plus omitted summary terminators, used
   only when the canonical big-endian checksum fails
-- lazy iteration, physical-ordinal access, and duplicate-aware lookup
+
+### MDict major version 1
+
+- MDX and MDD sections with 32-bit geometry, raw keyword metadata, one-byte
+  summary lengths, and unterminated summaries
+- uncompressed and LZO blocks
+
+Validated against 453 authorized real v1.2 MDX artifacts (407 fully validated,
+43,185,052 entries) and 14 authorized real v1.2 MDD artifacts (77,863 entries).
+A dictionary's MDX and MDD need not share a wire version; each file's version is
+resolved on its own.
+
+**Not supported for version 1**, and refused with a precise structured error
+rather than a guess:
+
+- encrypted version 1 files — no authorized artifact declares encryption and no
+  framing has been established
+- ISO8859-1 text, which real version 1.2 dictionaries declare but whose MDict
+  byte semantics are unresolved
+- zlib version 1 blocks are decoded by the shared envelope but have never been
+  observed in an authorized artifact, so creator compatibility is untested
+
+A version 1 file is never retried under the version 2 grammar, or the reverse,
+and no code path rewrites one version's bytes into the other's shape.
 
 Independent full-file tests cover every listed encoding and compression path,
 both encryption modes, multi-block boundaries, duplicate keys, corruption, and
-hostile declarations. Version 1.x/future-major layouts, writing, HTML/style
-processing, resource extraction policy, multi-volume discovery, prefix/fuzzy
-search, mmap, and persistent sidecars are out of scope.
+hostile declarations, for both wire versions. Future-major layouts, writing,
+HTML/style processing, resource extraction policy, multi-volume discovery,
+prefix/fuzzy search, mmap, and persistent sidecars are out of scope.
 
 ## Using mdictlib
 

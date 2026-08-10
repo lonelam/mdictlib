@@ -1,5 +1,10 @@
+//! Cryptographic primitives shared by every wire version.
+//!
+//! Only algorithms are shared here. Section framing — which bytes are
+//! encrypted, how a key is derived, and where a checksum comes from — is
+//! version-specific and lives in the corresponding grammar module.
+
 use crate::error::{Error, Result};
-use crate::types::Passcode;
 
 const RIPEMD128_R: [usize; 64] = [
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 7, 4, 13, 1, 10, 6, 15, 3, 12, 0, 9, 5,
@@ -25,34 +30,12 @@ const RIPEMD128_SP: [u32; 64] = [
     6, 14, 6, 9, 12, 9, 12, 5, 15, 8,
 ];
 
-pub fn decrypt_keyword_index_block(checksum: u32, data: &mut [u8]) {
-    let mut key_material = checksum.to_be_bytes().to_vec();
-    key_material.extend_from_slice(&[0x95, 0x36, 0x00, 0x00]);
-    let key = ripemd128(&key_material);
-
-    let mut previous = 0x36u8;
-    for (index, byte) in data.iter_mut().enumerate() {
-        let cipher = *byte;
-        let swapped = cipher.rotate_left(4);
-        *byte = swapped ^ (index as u8) ^ key[index % key.len()] ^ previous;
-        previous = cipher;
-    }
-}
-
-pub fn decrypt_keyword_header_block(data: &mut [u8], passcode: &Passcode) -> Result<()> {
-    let key = derive_keyword_header_key(passcode)?;
-    salsa20_8_xor(data, &key);
-    Ok(())
-}
-
-fn derive_keyword_header_key(passcode: &Passcode) -> Result<[u8; 16]> {
-    let mut encrypted_hash = decode_hex_16(&passcode.reg_code_hex)?;
-    let user_hash = ripemd128(passcode.user_id.as_bytes());
-    salsa20_8_xor(&mut encrypted_hash, &user_hash);
-    Ok(encrypted_hash)
-}
-
-fn decode_hex_16(text: &str) -> Result<[u8; 16]> {
+/// Decodes 32 hexadecimal digits into the 16-byte value they describe.
+///
+/// # Errors
+///
+/// Returns an error if the text is not exactly 32 hexadecimal digits.
+pub fn decode_hex_16(text: &str) -> Result<[u8; 16]> {
     if text.len() != 32 {
         return Err(Error::InvalidData(
             "registration code must be 32 hex digits".to_owned(),
@@ -270,20 +253,6 @@ fn quarter_round(state: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize) 
 }
 
 #[cfg(test)]
-fn encrypt_keyword_index_block(checksum: u32, data: &mut [u8]) {
-    let mut key_material = checksum.to_be_bytes().to_vec();
-    key_material.extend_from_slice(&[0x95, 0x36, 0x00, 0x00]);
-    let key = ripemd128(&key_material);
-
-    let mut previous = 0x36u8;
-    for (index, byte) in data.iter_mut().enumerate() {
-        let plain = *byte;
-        *byte = (plain ^ (index as u8) ^ key[index % key.len()] ^ previous).rotate_left(4);
-        previous = *byte;
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -298,20 +267,18 @@ mod tests {
     }
 
     #[test]
-    fn keyword_index_cipher_round_trips() {
-        let checksum = 0x12345678;
-        let mut payload = b"example payload".to_vec();
-        encrypt_keyword_index_block(checksum, &mut payload);
-        decrypt_keyword_index_block(checksum, &mut payload);
-        assert_eq!(payload, b"example payload");
-    }
-
-    #[test]
     fn salsa20_8_is_symmetric() {
         let key = [0x11u8; 16];
         let mut data = b"hello encrypted header".to_vec();
         salsa20_8_xor(&mut data, &key);
         salsa20_8_xor(&mut data, &key);
         assert_eq!(data, b"hello encrypted header");
+    }
+
+    #[test]
+    fn rejects_malformed_registration_codes() {
+        assert!(decode_hex_16("0011").is_err());
+        assert!(decode_hex_16("zz00112233445566778899aabbccddee").is_err());
+        assert!(decode_hex_16("000102030405060708090a0b0c0d0e0f").is_ok());
     }
 }

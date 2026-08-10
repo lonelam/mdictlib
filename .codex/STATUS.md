@@ -1,29 +1,40 @@
 # mdictlib Status
 
-Last updated: 2026-08-10
+Last updated: 2026-08-11 (v1 implementation)
 
 ## Current Snapshot
 
-- `mdictlib` `0.1.0` is the first public release.
+- `mdictlib` `0.1.0` is the released version. The working tree now also
+  implements **MDict major version 1** MDX and MDD.
+- Version 1 support is implemented, tested against independent synthetic
+  fixtures, fuzzed, and validated against 453 authorized real v1.2 MDX
+  artifacts. **407 of 453 complete full validation**; every rejected artifact
+  carries a structured retained classification.
+- **No release version has been selected or authorized.** Nothing has been
+  published, tagged, or pushed.
+- Real v1 MDD is **validated**: 16 approved artifacts were acquired into the
+  ignored cache and all 16 passed full validation, 14 of them declaring
+  version 1.2.
 - The canonical repository is `https://github.com/lonelam/mdictlib`; the
-  release tag is `v0.1.0` and the crate is published through crates.io.
+  released tag is `v0.1.0` and `0.1.0` is published through crates.io.
 - Rust is pinned to `1.97.1`; MSRV is `1.97`, edition 2024.
-- MDX and MDD major version 2 use one defensive, file-backed parser core.
+- MDX and MDD, and both wire versions, use one defensive, file-backed parser
+  core. The wire version is resolved once during open and never reaches lookup,
+  iteration, ordinal access, record decoding, or MDD streaming.
 - Header and block indexes are parsed eagerly under limits; key and record
   blocks are decoded lazily.
 - Unsafe code is forbidden.
-- Package metadata and `LICENSE` declare MIT.
+- The public API is byte-for-byte identical to `v0.1.0`.
 - Public corpus metadata and acquisition tooling are tracked separately from
   ignored, locally authorized dictionary bytes under `.corpus/`.
-
-All implementation milestones and the first-release transition in
-`.codex/IMPLEMENTATION_PLAN.md` are complete.
 
 ## 0.x Compatibility Policy
 
 The `0.1.0` public API is a published contract. Compatible fixes use patch
 releases. Intentional breaking public-API changes require a minor version bump
-and a changelog entry; local-only predecessor shapes remain irrelevant.
+and a changelog entry; local-only predecessor shapes remain irrelevant. Adding
+v1 support must not change the public API, and a public API diff against
+`v0.1.0` must stay empty.
 
 ## Architecture
 
@@ -37,18 +48,55 @@ Public root facade:
 
 Private implementation:
 
-- `src/core/mod.rs`: shared open state, caches, and memory accounting
-- `src/core/keys.rs`: lazy key blocks and physical ordinal access
-- `src/core/records.rs`: record descriptors, blocks, and span traversal
-- `src/core/iter.rs`: fused shared key/record iteration
-- `src/core/normalize.rs`: header-controlled lookup normalization
-- `src/core/locator.rs`: lazy global duplicate-aware locator
-- `src/format/`: headers, indexes, codecs, checksums, compression, and crypto
-- `src/source.rs` and `src/limits.rs`: bounded file I/O and policy machinery
+- `src/core/`: shared open state, caches, memory accounting, lazy key blocks,
+  ordinal access, record descriptors and spans, fused iteration, header-driven
+  normalization, and the lazy duplicate-aware locator. **Version-blind.**
+- `src/format/mod.rs`: the bounded common header, the single `WireVersion`
+  resolution, and the crate's only version `match`.
+- `src/format/common/`: `descriptors.rs` (the `ValidatedLayout` boundary),
+  `header.rs`, `cursor.rs`, `checked.rs`, `encoding.rs`, `compression.rs`,
+  `checksum.rs`, `crypto.rs` (shared algorithms only), and `source.rs`.
+- `src/format/v1/`: `mod.rs`, `keyword.rs`, `record.rs`.
+- `src/format/v2/`: `mod.rs`, `keyword.rs`, `record.rs`, `crypto.rs`
+  (version 2 encryption framing).
+- `src/limits.rs`: budget and policy machinery.
+
+Dependency direction:
+
+```text
+mdx.rs / mdd.rs -> core -> format facade -> ValidatedLayout
+                                         -> format::common
+                                         -> format::v1 | format::v2
+```
+
+`format::v1` and `format::v2` import neither the core, the facades, nor each
+other. `src/core`, `src/mdx.rs`, and `src/mdd.rs` name no wire version.
 
 The former implicit binary is absent; examples are the only executable targets.
 The separate fuzz crate uses narrow doc-hidden adapters only under cargo-fuzz's
 checked `cfg(fuzzing)`; the package exposes no fuzz-only Cargo feature.
+
+### How one core serves two wire versions
+
+The version is resolved once, immediately after the bounded common header, and
+both grammars emit the same private `ValidatedLayout`: the parsed header,
+separate key and record encodings, exact checked `SectionRanges`, the total
+entry count, the total decoded record length, `Box<[KeyBlockDescriptor]>`,
+`Box<[RecordBlockDescriptor]>`, `WireOperations`, and the retained metadata
+reservations.
+
+One difference survives past open: version 1 key rows carry a `u32` record
+offset and version 2 rows carry a `u64`. That is resolved by selecting one
+private non-capturing function at the same match:
+
+```text
+type DecodeKeyRows = fn(&[u8], &KeyRowContext) -> Result<Vec<DecodedKeyRow>>;
+struct WireOperations { decode_key_rows: DecodeKeyRows }
+```
+
+The core stores `WireOperations` and calls it on a lazy cache miss. There is no
+version enum in the core, no per-entry branch, and no trait object.
+`tests/architecture.rs` asserts all of this against the source text.
 
 ## Implemented Behavior
 
@@ -103,10 +151,17 @@ checked `cfg(fuzzing)`; the package exposes no fuzz-only Cargo feature.
 
 ## Supported And Fixture-Proven Paths
 
-- MDX and MDD v2-style sections
+Common to both wire versions:
+
+- MDX and MDD sections
 - UTF-8, UTF-16LE, GBK/GB2312, full GB18030, and Big5 decoding
-- uncompressed and zlib blocks
+- the shared eight-byte block envelope with big-endian ADLER32
 - optional LZO behind `lzo`
+- lazy iteration, physical-ordinal access, and duplicate-aware lookup
+
+Version 2 additionally:
+
+- uncompressed and zlib blocks
 - keyword-index encryption
 - passcode-protected keyword-header encryption
 - combined header/index encryption with compressed sections
@@ -114,11 +169,35 @@ checked `cfg(fuzzing)`; the package exposes no fuzz-only Cargo feature.
   keyword-header ADLER32 and omitted summary terminators, accepted only after
   the canonical big-endian checksum fails
 
+Version 1:
+
+- a 16-byte keyword header of four `u32` big-endian fields, with no
+  decompressed-size field and no keyword-header checksum
+- raw, uncompressed keyword metadata
+- one-byte summary lengths counting encoding units, with no terminators
+- `u32` big-endian key-row record offsets, widened to checked `u64`
+- a 16-byte record header of four `u32` fields
+- eight-byte `u32` record-index rows
+- uncompressed and LZO key and record blocks
+
+### Explicitly refused, with a precise structured error
+
+| Input | Error |
+| --- | --- |
+| ISO8859-1 text label (either version) | `Unsupported("ISO8859-1 text encoding (MDict byte semantics unresolved)")` |
+| version 1 declaring any encryption bit | `Unsupported("encrypted MDict version 1 keyword sections")` |
+| any major version other than 1 or 2 | `Unsupported("MDict format major version other than 1 or 2")` |
+| LZO block without the `lzo` feature | `Unsupported("LZO compressed blocks (enable the `lzo` feature)")` |
+
+**Not claimed:** encrypted v1, zlib-v1 creator compatibility (the shared
+envelope decodes it, but no authorized artifact was observed using it),
+ISO8859-1, and real v1 MDD.
+
 Independent full-file fixtures cover every supported encoding, none/zlib/LZO,
 both encrypted paths, mixed compression, multiple key/record blocks, duplicate
-keys, equal offsets, cross-block records, and source-bound MDD streaming. The
-LZO suite includes every file block class plus a hand-authored lookbehind match,
-not only literal streams.
+keys, equal offsets, cross-block records, and source-bound MDD streaming, for
+**both** wire versions. The v1 LZO suite includes an encoder that emits real
+lookbehind matches, not only literal streams.
 
 ## Defensive Validation
 
@@ -143,27 +222,207 @@ not only literal streams.
 
 ## Verification Snapshot
 
-Current local gates on 2026-08-10:
+Local gates on 2026-08-11, after version 1 support landed:
 
-- `cargo test --locked --all-targets`: passed
-- `cargo test --locked --all-targets --all-features`: passed
-  - 91 active tests passed
-  - 3 explicit private-corpus tests ignored by default
-- `cargo test --locked --test conformance_v2 --no-default-features`: 16 passed
 - `cargo fmt --all -- --check`: passed
+- `cargo test --locked --all-targets`: 164 passed, 0 failed, 3 ignored
+- `cargo test --locked --all-targets --all-features`: 165 passed, 0 failed,
+  3 ignored
+- `cargo test --locked --all-targets --no-default-features`: 164 passed,
+  0 failed, 3 ignored
+- `cargo test --locked --test conformance_v2 --no-default-features`: 17 passed
 - `cargo clippy --locked --all-targets --all-features -- -D warnings`: passed
-- strict rustdoc (`-D warnings -D missing_docs` plus link checks): passed
-- `cargo test --locked --doc --all-features`: passed
-- cargo-fuzz 0.13.2 / nightly-2026-08-09 AddressSanitizer and coverage build:
+- `cargo clippy --locked --all-targets --no-default-features -- -D warnings`:
   passed
-- seven bounded 32-run coverage-guided fuzz smoke targets: passed
-- offline packaged-crate build/test verification: passed
+- strict rustdoc (`-D warnings -D missing_docs`): passed
+- `cargo test --locked --doc --all-features`: passed
+- cargo-fuzz 0.13.2 / nightly-2026-08-09 AddressSanitizer build of all ten
+  targets: passed
+- ten bounded 64-run coverage-guided fuzz smoke campaigns: passed
 
-The committed CI workflow repeats default/all-feature tests on Linux, macOS,
-and Windows, and runs formatting, Clippy, strict docs, pinned
-AddressSanitizer/coverage-guided fuzz build/smoke, and offline package
-verification on Linux. Hosted results are recorded by the canonical GitHub
-repository rather than duplicated as static claims here.
+The three ignored tests are the explicit private-corpus tests, unchanged.
+
+### Regression evidence against the pre-v1 baseline
+
+- **Public API**: a source-level comparison of every public item reachable from
+  `lib.rs` against the `v0.1.0` worktree is **identical** (126 items).
+- **Version 2 corpus logical facts**: eight v2 artifacts audited with
+  `examples/corpus_audit` under both the pre-refactor build (`1b3f6bb`) and the
+  current build produced **byte-identical** entry counts, key digests, and
+  payload digests.
+- **Laziness**: `tests/shared_core_parity.rs` proves opening still decodes no
+  key or record block, for both wire versions.
+
+## Version 1 Implementation Status
+
+Version 1 MDX and MDD are implemented in `src/format/v1/`. The grammar is
+exactly what section "Supported And Fixture-Proven Paths" lists; nothing
+speculative was added.
+
+### Synthetic evidence
+
+`tests/support/v1.rs` is an independent version 1 encoder, physically separate
+from the version 2 encoder and never calling parser code. It drives:
+
+- `tests/conformance_v1.rs`: 31 tests covering every block coding, every
+  supported encoding, UTF-16 unit-counted summaries, duplicates, equal offsets,
+  empty records, cross-block records and resources, multiblock files, empty
+  dictionaries, precise ISO8859-1 and encryption refusals, both version
+  fallthrough directions, and the malformed matrix (every keyword and record
+  header field, v2-shaped index rows, trailing metadata bytes, malformed and
+  v2-style terminated summaries, wrong block sizes, checksum mismatches,
+  unknown and mismatched compression tags, invalid and decreasing record
+  offsets, truncation at every section boundary, and hostile `u32`
+  declarations).
+- `tests/shared_core_parity.rs`: builds the same logical dictionary under both
+  wire versions and runs the same assertions over both.
+- `tests/hardening_v1.rs`: single-byte mutation sweeps over whole MDX and MDD
+  files, truncation at every offset, per-limit enforcement, hostile `u32`
+  headers under a small memory ceiling, deterministic failure replay without
+  memory amplification, iterator fusion, and lazy-open proof.
+
+### Real MDX corpus evidence
+
+Re-derived on 2026-08-11 by `scripts/corpus/audit-v1.mjs`, which makes two
+independent observations per artifact: a from-scratch geometry probe written in
+the driver, and the `examples/v1_audit` worker run in an isolated
+timeout-bounded subprocess. Neither informs the other.
+
+- ledger: `corpus/mdict-org-2026-08-10.acquisition-outcomes.json`, SHA-256
+  `f19ced0c1b844277689cc723d15a762ea81678d3b4a19ddf5e28fe1af568ea65`
+- denominator rule: SHA-256 over sorted `<sha256>\t<bytes>\t<sourcePath>\n`
+  records, sorted by source path
+- denominator digest (453 artifacts):
+  `7b841b9191420684c3f0275007e0087068bbe654454f957d60059ffbefc4f1ed`
+- runner: `target/release/examples/v1_audit`, 860,640 bytes, SHA-256
+  `3480962d96a124b9db6c6f94a797856c640b9ac9bb2f259856fcfa7e1288fbd9`
+- host: darwin/arm64, Node.js v26.5.1, concurrency 4
+
+Independent geometry observation — this **reproduces**, from a reproducible
+command, every figure that was previously carried forward without an artifact:
+
+| Fact | Value |
+| --- | --- |
+| artifacts | 453 (2,677,098,909 bytes) |
+| fit the canonical v1 geometry through exact section EOF | **448** |
+| declared entries | **46,083,934** |
+| key blocks | **71,243** |
+| record blocks | **179,587** |
+| LZO for every key and record block | **446** |
+| one or more uncompressed key blocks with LZO records | **2** |
+| zlib blocks or uncompressed record blocks observed | **0** |
+
+The five non-conforming artifacts, retained individually:
+
+| Artifact | Classification |
+| --- | --- |
+| `b4ff52dd…`, `bab32567…`, `b7e8e533…`, `67e6b948…` | record section declared longer than the file (truncated) |
+| `e50c5d5d…` | keyword metadata leaves 262 trailing bytes while record geometry reaches exact EOF — **corruption versus creator variant unresolved**; no fallback was invented to accept it |
+
+Parser observation:
+
+| Outcome | Count | Bytes | Entries |
+| --- | --- | --- | --- |
+| accepted, fully validated | **407** | 2,383,691,169 | **43,185,052** |
+| rejected, structured classification | 46 | — | — |
+
+Every accepted artifact completed: exact declared entry count, ordinal
+continuity, `key_at` agreement with sequential iteration, raw lookup for every
+distinct key, all duplicate ordinals in ascending physical order, `lookup`
+selecting the lowest ordinal, and complete payload hashing.
+
+Rejection classes:
+
+| Category | Count | Note |
+| --- | --- | --- |
+| `record-decode` | 27 | source text not valid in its declared encoding (22 GBK, 3 UTF-8, 2 BIG5) |
+| `unsupported-encoding` | 11 | exactly the eleven ISO8859-1 artifacts |
+| `truncated` | 4 | the four truncated record sections, refused at open |
+| `key-decode` | 2 | BIG5 key text not decodable |
+| `compression-failure` | 1 | an LZO record block that would not decompress |
+| `limit-exceeded` | 1 | `e50c5d5d…`; the desynchronized metadata declares 6,946,917 entries in one block, above the 2,000,000 ceiling |
+
+Accepted encodings: UTF-16 204, GBK 144, UTF-8 58, BIG5 1.
+
+**No artifact was accepted whose geometry the independent probe rejected.**
+The two observations agree on all 453 rows.
+
+### Differential evidence
+
+Compared against `terasum/js-mdict` at
+`044fbf5101bb491942bac1bfffb39778a84cf84a` (AGPL-3.0, JavaScript lineage,
+independent of the Python `mdict-analysis` lineage), built from source and run
+through its public API. Ten accepted artifacts spanning GBK, BIG5, UTF-16, and
+UTF-8, totalling 8,551 entries.
+
+- **Entry counts: 10 of 10 agree exactly.**
+- **Payload bytes: every entry in all ten artifacts agrees**, once two reader
+  policy differences are accounted for.
+
+The two policy differences, both investigated against the raw bytes rather than
+resolved by majority vote:
+
+1. **Trailing record NUL.** `mdictlib` trims a record's trailing NUL
+   terminator; js-mdict retains it. This is `mdictlib`'s shipped `0.1.0`
+   behavior, unchanged.
+2. **Leading U+FEFF in a key.** Three artifacts contain exactly one key stored
+   with a byte-order mark. `mdictlib` preserves it, matching its documented
+   contract that a key is returned exactly as stored; js-mdict strips it. A
+   UTF-8 decoder cannot synthesize a BOM, so the bytes must contain one and
+   `mdictlib` is the faithful reader here.
+
+After accounting for those two, **zero unexplained disagreements** remain.
+
+#### Second lineage: `ffreemt/readmdict` (Python)
+
+`lzo` was installed via Homebrew and `python-lzo` built against it, so the
+Python lineage was run over the same ten artifacts.
+
+- **Entry counts: 10 of 10 agree** with `mdictlib`.
+- **Complete row sets (key plus payload digest) agree on 4 of 10.**
+- On the other six, `readmdict` returns the same number of rows and the same
+  keys, but a different payload for some of them.
+
+One differing row was examined in full. Both readers return **151 bytes** with
+an identical prefix; the middle differs. That artifact has 570 rows and 570
+distinct keys, so duplicate-key association cannot explain it. `mdictlib` and
+`js-mdict` — two independent lineages — return byte-identical content for that
+row, and `readmdict` is the outlier.
+
+**This is recorded as an open item, not as a passed or failed gate.** The root
+cause has not been established, and the honest reading is that two independent
+readers agree with `mdictlib` and a third does not, on some rows, for reasons
+not yet identified.
+
+### Real MDD evidence
+
+Acquisition of the 16 exact-stem MDD candidates was explicitly approved and
+executed on 2026-08-11 by `scripts/corpus/acquire-v1-mdd.mjs`, under a 64 MiB
+per-file and 128 MiB aggregate ceiling, from the single reviewed origin
+`https://mdx.mdict.org` over credential- and query-free HTTPS. All 16 transfers
+completed, totalling exactly the advertised 59,842,819 bytes, with zero errors.
+The bytes live only under the ignored `.corpus/` cache and are not committed.
+
+Every one of the 16 was then fully validated by `examples/v1_audit`:
+
+| Declared version | Files | Accepted | Entries | Payload bytes |
+| --- | --- | --- | --- | --- |
+| 1.2 | 14 | **14** | **77,863** | 73,547,408 |
+| 2.0 | 2 | 2 | 416 | 243,312 |
+| total | 16 | **16** | 78,279 | 73,790,720 |
+
+Each accepted MDD completed exact physical keys and ordinals, duplicate
+ordering, `key_at` and `lookup`, `resource_at`, `span_at` and `lookup_span`,
+and a byte-for-byte comparison of `copy_to` streaming against `read`
+materialization, with resources crossing record blocks exercised throughout.
+
+Two of the 16 turned out to be **version 2** MDD files paired with version 1
+MDX files. That is a real-world finding worth recording: a dictionary's MDX and
+MDD need not share a wire version, which is exactly why version resolution is
+per-file rather than per-dictionary.
+
+**Real v1 MDD support is now evidence-backed**, not inferred from synthetic
+fixtures.
 
 ## Corpus Discovery, Validation, And Benchmark Evidence
 
@@ -261,10 +520,13 @@ The tracked acquisition evidence is an exact verified pair:
   3,383,244 bytes, SHA-256
   `f19ced0c1b844277689cc723d15a762ea81678d3b4a19ddf5e28fe1af568ea65`.
 
+Both digests were re-verified on 2026-08-11.
+
 Metadata open/count promoted 792 files totaling 37,377,272,230 bytes and
 89,051,220 declared entries. The complete outcome report retains 462
 exclusions: 453 non-v2 formats, six keyword-summary decode failures, and three
-truncated record sections. The generated 792-row local manifest is 107,469
+truncated record sections. The 453 non-v2 rows are the v1 evidence base
+described above. The generated 792-row local manifest is 107,469
 bytes with SHA-256
 `f45f5e02ea5eaf3eecf032048c72db62ce191310978b0eef96258d39790daef1`.
 These entry counts were observed by `mdictlib`; they are regression baselines,
@@ -356,7 +618,8 @@ Representative measured results on Apple M2 Pro / macOS 26.6 / Rust 1.97.1:
 
 Commands, exact route hashes, all seven deidentified corpus hashes, and the 2x
 diagnostic regression policy are recorded in
-`.codex/benchmarks/2026-08-10-macos-arm64.md`.
+`.codex/benchmarks/2026-08-10-macos-arm64.md`. These are the frozen v2
+baselines the v1 program must not regress.
 
 ## Release Hygiene
 
@@ -378,5 +641,46 @@ diagnostic regression policy are recorded in
 - Tag: `https://github.com/lonelam/mdictlib/tree/v0.1.0`
 - Package: `https://crates.io/crates/mdictlib/0.1.0`
 
-Future releases require a version decision, synchronized changelog and docs,
-the same release gates, and explicit maintainer authorization.
+**No next release version has been selected or authorized.** Version 1 support
+is implemented in the working tree but unreleased. Any future release requires a
+version decision, synchronized changelog and docs, the same release gates plus
+the v1 exit gates in `.codex/IMPLEMENTATION_PLAN.md` section 9, real v1 MDD
+evidence or an explicit decision to ship without it, and explicit maintainer
+authorization.
+
+## Active TODOs
+
+1. Root-cause the `readmdict` payload disagreement on six of ten sampled
+   artifacts. Two independent lineages agree with `mdictlib` on those rows, so
+   this is an open question about the third reader, but it is unresolved.
+2. Decide whether to track the version 1 corpus outcome report the way the
+   version 2 ledgers are tracked. The run is reproducible from
+   `scripts/corpus/audit-v1.mjs` today, but its report is not committed.
+3. Re-run the checked-in benchmark harness on the recorded host to refresh the
+   performance baseline; the 2026-08-10 numbers predate this work.
+4. Select a release version. **Not done, and not authorized.**
+
+## Known Risks
+
+- Real v1 MDD evidence covers **14 artifacts and 77,863 entries**. That is a
+  much smaller denominator than the MDX evidence, and all 16 came from one
+  origin and a narrow candidate rule.
+- Differential confirmation rests on two independent lineages. They agree with
+  `mdictlib` on entry counts everywhere, but the Python lineage disagrees on
+  payload content for six of ten sampled artifacts and that is **unresolved**.
+  The GoldenDict, Java, and Rust lineages were not attempted.
+- 27 of 453 real v1 artifacts fail record text decoding in their declared
+  encoding, and 2 fail key decoding. These look like source-data defects — the
+  same class the v2 corpus shows — but they have not been confirmed against a
+  second reader.
+- Eleven real v1 artifacts declare ISO8859-1 and are refused. Resolving that
+  label would make them readable and is a separate scoped decision.
+- One artifact (`e50c5d5d…`) remains **corruption versus creator variant
+  unresolved**. It is refused; if it is a creator variant, some real files use
+  a keyword-metadata shape this grammar does not model.
+- The `GeneratedByEngineVersion` versus `RequiredEngineVersion` dispatch
+  question is unchanged and still unresolved. Version resolution keys on
+  `GeneratedByEngineVersion`, exactly as `0.1.0` did.
+- zlib in a v1 file is decoded by the shared envelope but has never been seen in
+  an authorized artifact, so creator compatibility is untested.
+- The benchmark baseline predates this work and has not been re-measured.
