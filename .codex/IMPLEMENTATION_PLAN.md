@@ -4,15 +4,13 @@ Last updated: 2026-08-10
 
 ## 1. Release State And Design Premise
 
-`mdictlib` is a first-release candidate. It has never been published, so the
-repository intentionally contains one coherent API rather than compatibility
-shims for earlier local-only designs. The candidate version is `0.1.0`.
+`mdictlib` `0.1.0` is the first public release. The repository established one
+coherent API before publication rather than carrying compatibility shims for
+earlier local-only designs.
 
-All implementation milestones in this roadmap are complete. `publish = false`
-remains a deliberate guard: publishing a crate, creating a release tag, and
-pushing to the canonical repository are irreversible external actions and
-require explicit maintainer authorization. The release-transition checklist in
-section 8 records those actions without treating them as parser work.
+All implementation milestones and the first-release transition in this roadmap
+are complete. Future releases remain explicit maintainer actions governed by
+the `0.x` compatibility policy in `AGENTS.md`.
 
 Evidence rules:
 
@@ -24,8 +22,8 @@ Evidence rules:
 
 ## 2. Goal And Supported Scope
 
-The release candidate is a defensive, library-first reader for MDict major
-version 2 `.mdx` and `.mdd` files. It provides:
+The `0.1.0` release is a defensive, library-first reader for MDict major version
+2 `.mdx` and `.mdd` files. It provides:
 
 - one shared, file-backed parser for MDX and MDD;
 - eager bounded metadata/index parsing with lazy key and record blocks;
@@ -149,7 +147,7 @@ each decoded block remains bounded.
 
 Every file-derived count, length, offset, range, decoded size, reservation, and
 section sum is checked before the corresponding read or allocation. The
-candidate additionally enforces:
+release additionally enforces:
 
 - the header ceiling before reading its declared body;
 - checked `u64`/`usize` conversions and checked add/multiply throughout;
@@ -179,7 +177,7 @@ candidate additionally enforces:
 | 3. Lookup semantics and normalization | complete | Raw-before-normalized, aliases/conflicts, author-profile StripKey, non-ASCII controls, five-block collisions, nonmonotonic summaries, and duplicate order tests |
 | 4. Complete shared locator | complete | Lazy budgeted global locator shared by MDX/MDD; exhaustive corpus raw queries and duplicate ordinals pass |
 | 5. Generic-v2 conformance | complete | Full synthetic MDX/MDD files for all encodings, none/zlib/LZO, both encryption modes, corruption, tight limits, concurrent first lookup, seven fuzz targets, multi-OS CI definition |
-| 6. Performance and release-candidate audit | complete | Versioned private-manifest evidence, locator/warm lookup/full scan/ordinal/stream/materialize/concurrency/RSS measurements, docs and package gates |
+| 6. Performance and release audit | complete | Versioned private-manifest evidence, locator/warm lookup/full scan/ordinal/stream/materialize/concurrency/RSS measurements, docs and package gates |
 
 The active all-feature suite contains complete synthetic dictionaries rather
 than only primitive parser tests. LZO evidence includes whole files covering
@@ -217,21 +215,18 @@ not a cross-machine performance promise. Default limits remain intentionally
 well above the largest observed valid-corpus peak while still bounding hostile
 metadata.
 
-## 8. First-Release Transition (Explicit Authorization Required)
+## 8. First-Release Transition (Complete)
 
-The repository is prepared for, but does not autonomously perform, these
-external actions:
+The authorized transition completed these external actions:
 
-1. confirm the canonical remote and run the committed CI workflow on Linux,
-   macOS, and Windows;
-2. review the packaged `0.1.0` file list and release notes one final time;
-3. explicitly authorize removing `publish = false`;
-4. publish `mdictlib` and create/push the `v0.1.0` tag;
-5. after publication, replace this pre-release API policy with an explicit
-   compatibility/versioning policy.
+1. set `git@github.com:lonelam/mdictlib.git` as the canonical remote;
+2. reviewed the exact `0.1.0` package contents and release notes;
+3. made the root package publishable while keeping the fuzz crate unpublished;
+4. published `mdictlib` `0.1.0` and pushed the `v0.1.0` tag;
+5. replaced the pre-release policy with the `0.x` compatibility policy.
 
-No parser, test, documentation, benchmark, or package implementation work is
-deferred to this transition.
+No parser, test, documentation, benchmark, or package implementation work was
+deferred to the transition.
 
 ## 9. Deferred And Out Of Scope
 
@@ -244,5 +239,5 @@ deferred to this transition.
 - host application integration, UI/resource ordering, and rollout policy.
 
 Update this roadmap and `.codex/STATUS.md` whenever architecture, API, scope,
-risks, fixtures, or evidence changes. Update `AGENTS.md` when publication changes
-the compatibility premise.
+risks, fixtures, or evidence changes. Update `AGENTS.md` when the compatibility
+or release policy changes.

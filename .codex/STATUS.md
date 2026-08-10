@@ -4,9 +4,9 @@ Last updated: 2026-08-10
 
 ## Current Snapshot
 
-- `mdictlib` is a first-release candidate and has never been published.
-- The candidate package version is `0.1.0`; `publish = false` prevents an
-  accidental external release until the maintainer explicitly authorizes it.
+- `mdictlib` `0.1.0` is the first public release.
+- The canonical repository is `https://github.com/lonelam/mdictlib`; the
+  release tag is `v0.1.0` and the crate is published through crates.io.
 - Rust is pinned to `1.97.1`; MSRV is `1.97`, edition 2024.
 - MDX and MDD major version 2 use one defensive, file-backed parser core.
 - Header and block indexes are parsed eagerly under limits; key and record
@@ -14,17 +14,14 @@ Last updated: 2026-08-10
 - Unsafe code is forbidden.
 - Package metadata and `LICENSE` declare MIT.
 
-All implementation milestones in `.codex/IMPLEMENTATION_PLAN.md` are complete.
-Remaining release-transition work is external: confirm the canonical remote,
-observe the committed CI workflow on all three hosted platforms, and explicitly
-authorize publishing/tagging.
+All implementation milestones and the first-release transition in
+`.codex/IMPLEMENTATION_PLAN.md` are complete.
 
-## Pre-Release API Policy
+## 0.x Compatibility Policy
 
-Until the first published release, compatibility with local-only predecessor
-shapes is not a constraint. The tree contains no deprecated aliases, migration
-layers, or public implementation modules. After publication, update this file,
-the roadmap, and `AGENTS.md` with the chosen compatibility/versioning policy.
+The `0.1.0` public API is a published contract. Compatible fixes use patch
+releases. Intentional breaking public-API changes require a minor version bump
+and a changelog entry; local-only predecessor shapes remain irrelevant.
 
 ## Architecture
 
@@ -138,7 +135,7 @@ not only literal streams.
 
 ## Verification Snapshot
 
-Local release-candidate gates on 2026-08-10:
+Local `0.1.0` release gates on 2026-08-10:
 
 - `cargo test --locked --all-targets`: passed
 - `cargo test --locked --all-targets --all-features`: passed
@@ -157,8 +154,8 @@ Local release-candidate gates on 2026-08-10:
 The committed CI workflow repeats default/all-feature tests on Linux, macOS,
 and Windows, and runs formatting, Clippy, strict docs, pinned
 AddressSanitizer/coverage-guided fuzz build/smoke, and offline package
-verification on Linux. A hosted run awaits canonical-remote confirmation; it
-is not represented here as already executed.
+verification on Linux. Hosted results are recorded by the canonical GitHub
+repository rather than duplicated as static claims here.
 
 ## Private Corpus And Benchmark Evidence
 
@@ -195,22 +192,19 @@ diagnostic regression policy are recorded in
 ## Release Hygiene
 
 - `.github/workflows/ci.yml` exists.
-- `CHANGELOG.md` has a first-release Unreleased summary.
+- `CHANGELOG.md` has dated `0.1.0` release notes.
 - `README.md`, crate rustdoc, examples, public API tests, and package metadata
-  describe the same candidate behavior.
-- `Cargo.toml` has `autobins = false`, a deliberate package include list, and
-  `publish = false`.
+  describe the same released behavior.
+- `Cargo.toml` has `autobins = false` and a deliberate package include list.
 - Private corpus bytes, private manifests, temporary files, benchmark raw
   output, and `draft/` are not packaged.
-- The initial commit contains the complete release-candidate tree after all
-  local gates passed.
+- The `v0.1.0` tag identifies the exact source used for the first package.
 
-## Remaining External Actions
+## Release State
 
-1. Confirm or correct the canonical Git remote.
-2. Push and observe the committed multi-platform CI workflow.
-3. Explicitly authorize removal of `publish = false`, crate publication, and
-   creation/push of the `v0.1.0` tag.
-4. Replace the pre-release API policy after the first release.
+- Source: `https://github.com/lonelam/mdictlib`
+- Tag: `https://github.com/lonelam/mdictlib/tree/v0.1.0`
+- Package: `https://crates.io/crates/mdictlib/0.1.0`
 
-These are release authority/state transitions, not unfinished parser goals.
+Future releases require a version decision, synchronized changelog and docs,
+the same release gates, and explicit maintainer authorization.

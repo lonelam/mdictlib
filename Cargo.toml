@@ -3,7 +3,6 @@ name = "mdictlib"
 version = "0.1.0"
 edition = "2024"
 autobins = false
-publish = false
 authors = ["Lonelam <laizenan@gmail.com>"]
 description = "Library-first Rust parser for MDict .mdx and .mdd dictionaries"
 license = "MIT"

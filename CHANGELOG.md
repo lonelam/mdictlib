@@ -1,8 +1,10 @@
 # Changelog
 
-All notable changes are recorded here. No versions have been released yet.
+All notable changes are recorded here.
 
-## Unreleased
+## [Unreleased]
+
+## [0.1.0] - 2026-08-10
 
 ### Added
 
@@ -55,5 +57,7 @@ All notable changes are recorded here. No versions have been released yet.
   wire-format modules.
 - Removed the accidental implicit binary target and restricted packaged files
   to the library, examples, tests, documentation, and license material.
-- Prepared version `0.1.0` as the first-release candidate while retaining
-  `publish = false` until explicit publication authorization.
+- Released version `0.1.0` as the first public release.
+
+[Unreleased]: https://github.com/lonelam/mdictlib/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/lonelam/mdictlib/tree/v0.1.0

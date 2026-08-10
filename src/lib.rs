@@ -7,7 +7,7 @@
 //! before header-normalized fallback, and MDD resources can be streamed through
 //! source-bound spans. Per-open limits bound untrusted input and parser work.
 //!
-//! This repository is the unreleased `0.1.0` candidate.
+//! Version `0.1.0` is the first public release of `mdictlib`.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

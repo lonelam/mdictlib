@@ -10,16 +10,15 @@
 ## Project Goal
 
 Build a high-performance, safe, library-first Rust parser for `.mdx` and
-`.mdd`. The intended crate name is `mdictlib`.
+`.mdd`. The published crate name is `mdictlib`.
 
-## Pre-Release API Policy
+## 0.x Compatibility Policy
 
-The crate is a `0.1.0` release candidate but has not had its first published
-release. Until publication is explicitly authorized and completed, optimize
-for one coherent API and architecture rather than backward compatibility. Do
-not add compatibility shims, deprecated aliases, or migration layers for
-earlier local-only APIs. Do not remove `publish = false`, publish, tag, or push
-a release without explicit maintainer authorization.
+Version `0.1.0` is the first public release. Treat its public API as a published
+contract: compatible fixes use patch releases, while intentional breaking
+public-API changes require a minor version bump and a changelog entry. Do not
+publish, tag, or push a future release without explicit maintainer
+authorization.
 
 ## Non-Negotiable Engineering Rules
 

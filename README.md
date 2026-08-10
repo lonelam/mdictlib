@@ -3,10 +3,6 @@
 `mdictlib` is a safe, library-first Rust reader for MDict `.mdx` text
 dictionaries and `.mdd` resource dictionaries.
 
-> This repository is the unreleased `0.1.0` candidate. The API is coherent for
-> a first release, but no version has been published. `publish = false` remains
-> enabled until publication is explicitly authorized.
-
 ## Design
 
 - MDX and MDD use one shared, file-backed parsing core.
@@ -39,20 +35,18 @@ hostile declarations. Version 1.x/future-major layouts, writing, HTML/style
 processing, resource extraction policy, multi-volume discovery, prefix/fuzzy
 search, mmap, and persistent sidecars are out of scope.
 
-## Using The Unreleased Candidate
-
-Use a local path until the first release:
+## Using mdictlib
 
 ```toml
 [dependencies]
-mdictlib = { path = "../mdictlib" }
+mdictlib = "0.1.0"
 ```
 
 Enable LZO when required by a dictionary:
 
 ```toml
 [dependencies]
-mdictlib = { path = "../mdictlib", features = ["lzo"] }
+mdictlib = { version = "0.1.0", features = ["lzo"] }
 ```
 
 ## MDX
@@ -270,7 +264,7 @@ streaming and materialization, concurrent first lookup, deterministic hashes,
 and accounted memory. Optional controls are `MDICT_BENCH_FILTER`,
 `MDICT_BENCH_WARM_RUNS`, and `MDICT_BENCH_THREADS`.
 
-The checked-in release-candidate evidence covers seven private v2 files,
+The checked-in `0.1.0` release evidence covers seven private v2 files,
 3.61 GB, and 804,572 physical entries, including exhaustive raw lookup and
 ordinal/payload round trips. Exact commands, hashes, timings, memory accounting,
 and externally measured peak RSS are recorded in the repository at
