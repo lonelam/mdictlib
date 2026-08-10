@@ -77,14 +77,14 @@ prefix/fuzzy search, mmap, and persistent sidecars are out of scope.
 
 ```toml
 [dependencies]
-mdictlib = "0.1.0"
+mdictlib = "0.2.0"
 ```
 
 Enable LZO when required by a dictionary:
 
 ```toml
 [dependencies]
-mdictlib = { version = "0.1.0", features = ["lzo"] }
+mdictlib = { version = "0.2.0", features = ["lzo"] }
 ```
 
 ## MDX

@@ -4,7 +4,7 @@ All notable changes are recorded here.
 
 ## [Unreleased]
 
-No release version has been selected for this work.
+## [0.2.0] - 2026-08-11
 
 ### Added
 
@@ -104,6 +104,11 @@ digests, and payload digests are unchanged.
   logical-baseline lock was produced because the run was not wholly successful;
   the results remain self-observed regression evidence.
 
+### Package
+
+- Bumped the crate minor version to `0.2.0` for MDict major version 1 support
+  behind the unchanged `0.1.0` public API.
+
 ## [0.1.0] - 2026-08-10
 
 ### Added
@@ -159,5 +164,6 @@ digests, and payload digests are unchanged.
   to the library, examples, tests, documentation, and license material.
 - Released version `0.1.0` as the first public release.
 
-[Unreleased]: https://github.com/lonelam/mdictlib/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/lonelam/mdictlib/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/lonelam/mdictlib/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/lonelam/mdictlib/tree/v0.1.0

@@ -1,6 +1,6 @@
 # mdictlib Implementation Roadmap
 
-Last updated: 2026-08-11 (v1 implemented)
+Last updated: 2026-08-11 (v0.2.0 selected)
 
 ## 1. Release State And Active Program
 
@@ -9,12 +9,12 @@ Last updated: 2026-08-11 (v1 implemented)
 
 The **MDict version 1 compatibility program is implemented** in the working
 tree. Milestones 1 through 6 are complete; milestone 7 is complete except for
-its one approval-blocked input. No release version has been selected or
-authorized, and nothing has been published, tagged, or pushed.
+publishing. Crate metadata and `CHANGELOG.md` select **`0.2.0`**; nothing has
+been published, tagged, or pushed.
 
 Real version 1 MDD evidence is complete: 16 candidates were acquired under an
 explicitly approved bounded proposal and all 16 passed full validation, 14 of
-them declaring version 1.2. Future releases remain
+them declaring version 1.2. Publishing, tagging, and pushing remain
 explicit maintainer actions governed by the `0.x` compatibility policy in
 `AGENTS.md`.
 
@@ -730,7 +730,7 @@ authorization.
 | 4. Implement `format::v1` | complete | Only evidence-backed grammar. Encryption and ISO8859-1 refused precisely. |
 | 5. Safety and fuzzing | complete | Ten fuzz targets under AddressSanitizer, including `v1_whole_file`, `v1_truncation`, and `version_dispatch`; mutation and truncation sweeps over whole v1 MDX and MDD files. |
 | 6. Corpus and differential validation | complete | 407 of 453 real artifacts fully validated; 46 rejected with retained classifications; two independent observations agree on all 453. Differential against one independent lineage with zero unexplained disagreements. |
-| 7. MDD validation, documentation, release decision | MDD and docs complete; release **not** selected | README, STATUS, this roadmap, `CHANGELOG.md`, and crate rustdoc updated. Release version deliberately not chosen. |
+| 7. MDD validation, documentation, release decision | MDD and docs complete; **`0.2.0` selected** | README, STATUS, this roadmap, `CHANGELOG.md`, and crate rustdoc updated. Crate version is `0.2.0`; publish/tag/push still require authorization. |
 
 ### 8.6 What was learned that changed the plan
 

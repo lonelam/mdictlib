@@ -1,17 +1,18 @@
 # mdictlib Status
 
-Last updated: 2026-08-11 (v1 implementation)
+Last updated: 2026-08-11 (v0.2.0 selected)
 
 ## Current Snapshot
 
-- `mdictlib` `0.1.0` is the released version. The working tree now also
-  implements **MDict major version 1** MDX and MDD.
+- `mdictlib` `0.2.0` is the selected crate version for MDict major version 1
+  MDX and MDD support. `0.1.0` remains the last published release on crates.io.
 - Version 1 support is implemented, tested against independent synthetic
   fixtures, fuzzed, and validated against 453 authorized real v1.2 MDX
   artifacts. **407 of 453 complete full validation**; every rejected artifact
   carries a structured retained classification.
-- **No release version has been selected or authorized.** Nothing has been
-  published, tagged, or pushed.
+- **Publishing, tagging, and pushing `0.2.0` are not authorized yet.** The
+  crate version and changelog are synchronized; external release actions still
+  require explicit maintainer authorization.
 - Real v1 MDD is **validated**: 16 approved artifacts were acquired into the
   ignored cache and all 16 passed full validation, 14 of them declaring
   version 1.2.
@@ -34,7 +35,8 @@ The `0.1.0` public API is a published contract. Compatible fixes use patch
 releases. Intentional breaking public-API changes require a minor version bump
 and a changelog entry; local-only predecessor shapes remain irrelevant. Adding
 v1 support must not change the public API, and a public API diff against
-`v0.1.0` must stay empty.
+`v0.1.0` must stay empty. `0.2.0` is a minor bump for version 1 support
+without a public-API break.
 
 ## Architecture
 
@@ -624,9 +626,9 @@ baselines the v1 program must not regress.
 ## Release Hygiene
 
 - `.github/workflows/ci.yml` exists.
-- `CHANGELOG.md` has dated `0.1.0` release notes.
+- `CHANGELOG.md` has dated `0.1.0` and `0.2.0` release notes.
 - `README.md`, crate rustdoc, examples, public API tests, and package metadata
-  describe the same released behavior.
+  describe the same selected `0.2.0` behavior.
 - `Cargo.toml` has `autobins = false` and a deliberate package include list.
 - Private corpus bytes, private manifests, temporary files, benchmark raw
   output, and `draft/` are not packaged.
@@ -641,12 +643,11 @@ baselines the v1 program must not regress.
 - Tag: `https://github.com/lonelam/mdictlib/tree/v0.1.0`
 - Package: `https://crates.io/crates/mdictlib/0.1.0`
 
-**No next release version has been selected or authorized.** Version 1 support
-is implemented in the working tree but unreleased. Any future release requires a
-version decision, synchronized changelog and docs, the same release gates plus
-the v1 exit gates in `.codex/IMPLEMENTATION_PLAN.md` section 9, real v1 MDD
-evidence or an explicit decision to ship without it, and explicit maintainer
-authorization.
+**`0.2.0` is selected in crate metadata and the changelog.** Publishing the
+package, creating `v0.2.0`, and pushing still require the same release gates
+plus the v1 exit gates in `.codex/IMPLEMENTATION_PLAN.md` section 9, and
+explicit maintainer authorization. Nothing has been published, tagged, or
+pushed for `0.2.0`.
 
 ## Active TODOs
 
@@ -658,7 +659,7 @@ authorization.
    `scripts/corpus/audit-v1.mjs` today, but its report is not committed.
 3. Re-run the checked-in benchmark harness on the recorded host to refresh the
    performance baseline; the 2026-08-10 numbers predate this work.
-4. Select a release version. **Not done, and not authorized.**
+4. Publish, tag, and push `0.2.0` after release gates pass. **Not authorized.**
 
 ## Known Risks
 

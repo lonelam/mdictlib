@@ -18,7 +18,8 @@
 //! Encrypted version 1 files and the ISO8859-1 text label are refused with a
 //! precise error rather than parsed speculatively.
 //!
-//! Version `0.1.0` is the first public release of `mdictlib`.
+//! Version `0.2.0` adds MDict major version 1 support behind the same public
+//! API as the first public release, `0.1.0`.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
