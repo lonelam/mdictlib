@@ -45,7 +45,7 @@ jobs:
         with:
           node-version: 22
       - name: Test corpus inventory and acquisition tooling
-        run: node --test scripts/corpus/*.test.mjs scripts/corpus/test/*.test.mjs
+        run: node --test --test-concurrency=1 scripts/corpus/*.test.mjs scripts/corpus/test/*.test.mjs
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Lint every target and feature

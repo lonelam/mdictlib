@@ -179,7 +179,7 @@ export async function writeTextAtomic(outputPath, text) {
   await mkdir(outputDirectory, { recursive: true });
   const temporary = path.join(
     outputDirectory,
-    `.${path.basename(outputPath)}.part-${process.pid}-${randomBytes(8).toString("hex")}`,
+    `${path.basename(outputPath)}.part-${process.pid}-${randomBytes(8).toString("hex")}`,
   );
   let handle;
   try {
@@ -981,6 +981,8 @@ export async function downloadAtomic({
   let activeResponse;
   let ownsPartial = false;
   let keepPartial = false;
+  let bytes = 0;
+  let partialBytes = 0;
   try {
     try {
       ownershipHandle = await open(
@@ -1067,7 +1069,7 @@ export async function downloadAtomic({
       }
     };
     let partialMetadata = null;
-    let partialBytes = 0;
+    partialBytes = 0;
     const partialKind = await existingKind(temporary);
     const metadataKind = await existingKind(partialMetadataPath);
     if (partialKind !== "missing" || metadataKind !== "missing") {
@@ -1163,6 +1165,7 @@ export async function downloadAtomic({
       });
     };
 
+    bytes = partialBytes;
     keepPartial = partialBytes > 0;
     resetInactivityTimer();
     let opened = await request(partialBytes, partialMetadata);
@@ -1249,6 +1252,7 @@ export async function downloadAtomic({
     };
     if (partialMetadata === null) {
       await writeTextAtomic(partialMetadataPath, stableJson(newPartialMetadata));
+      keepPartial = true;
     }
     await ensureSafeCorpusParent(root, destination, false);
     const openFlags = partialMetadata === null
@@ -1262,7 +1266,7 @@ export async function downloadAtomic({
     );
     await ensureSafeCorpusParent(root, destination, false);
     const hash = prefixHash;
-    let bytes = partialBytes;
+    bytes = partialBytes;
     keepPartial = true;
     if (response.body === null) fail("successful download has no response body");
     for await (const rawChunk of response.body) {
@@ -1312,6 +1316,11 @@ export async function downloadAtomic({
     }
     activeResponse = undefined;
     try {
+      if (keepPartial && handle) await handle.sync();
+    } catch {
+      // Preserve the original download error.
+    }
+    try {
       await handle?.close();
     } catch {
       // Preserve the original download error.
@@ -1320,7 +1329,11 @@ export async function downloadAtomic({
       await rm(temporary, { force: true });
       await rm(partialMetadataPath, { force: true });
     }
-    throw error;
+    const normalized = error instanceof Error ? error : new Error(String(error));
+    if (keepPartial && bytes > partialBytes && !/truncated|terminated|aborted|ECONNRESET|network activity/i.test(normalized.message)) {
+      throw new Error(`truncated download interrupted after ${bytes} bytes: ${normalized.message}`, { cause: normalized });
+    }
+    throw normalized;
   } finally {
     clearTimeout(timer);
     clearTimeout(deadlineTimer);

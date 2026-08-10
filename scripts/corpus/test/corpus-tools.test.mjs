@@ -63,6 +63,15 @@ async function temporaryRoot(label) {
   return mkdtemp(path.join(os.tmpdir(), `mdictlib-${label}-`));
 }
 
+async function waitForCondition(predicate, { timeoutMs = 5_000, intervalMs = 10 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(`condition not met within ${timeoutMs} ms`);
+}
+
 async function serverFixture() {
   let truncationRequests = 0;
   let totalRequests = 0;
@@ -95,8 +104,9 @@ async function serverFixture() {
     }
     if (request.url === "/slow-file") {
       response.writeHead(200, { "content-length": PAYLOAD.length, etag: '"fixture-v1"' });
+      response.flushHeaders?.();
       response.write(PAYLOAD.subarray(0, 11));
-      setTimeout(() => response.end(PAYLOAD.subarray(11)), 75);
+      setTimeout(() => response.end(PAYLOAD.subarray(11)), 2_000);
       return;
     }
     if (request.url === "/truncate") {
@@ -118,9 +128,9 @@ async function serverFixture() {
           "content-length": PAYLOAD.length,
           etag: '"fixture-v1"',
         });
-        response.flushHeaders();
+        response.flushHeaders?.();
         response.write(PAYLOAD.subarray(0, 11));
-        setTimeout(() => response.destroy(), 20);
+        setTimeout(() => response.destroy(), 500);
       }
       return;
     }
@@ -635,10 +645,6 @@ test("truncated response leaves a stable partial and the next run resumes with R
 test("a concurrent partial mutation is never installed or journaled as verified bytes", async (t) => {
   const root = await temporaryRoot("partial-mutation");
   const fixture = await serverFixture();
-  t.after(async () => {
-    await fixture.close();
-    await rm(root, { recursive: true, force: true });
-  });
   const destination = path.join(root, "mutated.mdx");
   const partial = path.join(root, ".mutated.mdx.part");
   const downloading = downloadAtomic({
@@ -652,11 +658,12 @@ test("a concurrent partial mutation is never installed or journaled as verified 
     timeoutMs: 5_000,
     networkPolicy: TEST_NETWORK_POLICY,
   });
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (existsSync(partial) && (await stat(partial)).size >= 11) break;
-    await new Promise((resolve) => setTimeout(resolve, 2));
-  }
-  assert.equal(existsSync(partial), true);
+  t.after(async () => {
+    await downloading.catch(() => {});
+    await fixture.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  await waitForCondition(async () => existsSync(partial) && (await stat(partial)).size >= 11);
   await writeFile(partial, Buffer.alloc(PAYLOAD.length, 0x78));
   await assert.rejects(downloading, /completed partial bytes differ/);
   assert.equal(existsSync(destination), false);
