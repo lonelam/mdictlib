@@ -353,7 +353,7 @@ pub struct Limits {
 impl Limits {
     /// Creates the default defensive limit policy.
     pub const fn new() -> Self {
-        Self {
+    Self {
             header_xml_bytes: 16 * 1024 * 1024,
             header_attributes: 4 * 1024,
             key_index_bytes: 64 * 1024 * 1024,
@@ -363,7 +363,9 @@ impl Limits {
             block_metadata_bytes: 64 * 1024 * 1024,
             key_block_entries: 2_000_000,
             materialized_record_bytes: 64 * 1024 * 1024,
-            locator_entries: 10_000_000,
+            // Keep this effectively unbounded by count; the hard count cap is
+            // enforced later by the locator index type.
+            locator_entries: u64::from(u32::MAX),
             locator_bytes: 512 * 1024 * 1024,
             working_memory_bytes: 1024 * 1024 * 1024,
         }
@@ -433,9 +435,18 @@ impl Limits {
     }
 
     /// Sets the maximum number of physical rows retained by the lookup locator.
+    /// The effective upper bound is also limited by the locator index width.
     #[must_use]
     pub const fn with_locator_entries(mut self, value: u64) -> Self {
         self.locator_entries = value;
+        self
+    }
+
+    /// Removes locator row-count limiting so lookups are only bounded by the
+    /// locator index width (u32).
+    #[must_use]
+    pub const fn with_unlimited_locator_entries(mut self) -> Self {
+        self.locator_entries = u64::from(u32::MAX);
         self
     }
 
@@ -618,5 +629,13 @@ mod tests {
         let user_id = "x".repeat(4097);
         let error = Passcode::new("0123456789abcdef0123456789abcdef", &user_id).unwrap_err();
         assert!(matches!(error, Error::InvalidPasscode(_)));
+    }
+
+    #[test]
+    fn unlimited_locator_entries_overrides_row_cap() {
+        let limits = Limits::new()
+            .with_locator_entries(1)
+            .with_unlimited_locator_entries();
+        assert_eq!(limits.locator_entries(), u64::from(u32::MAX));
     }
 }
