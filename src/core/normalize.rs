@@ -31,29 +31,42 @@ impl KeyNormalizer {
         let capacity = self.normalized_len(raw)?;
         let mut normalized = String::new();
         try_reserve_string(&mut normalized, capacity, "normalized key")?;
+        self.normalize_into(raw, &mut normalized);
+        Ok(normalized)
+    }
 
-        for character in raw.chars().filter(|character| {
-            !matches!(self.strip_profile, Some(StripKeyProfile::AsciiAlphanumeric))
-                || !character.is_ascii()
-                || character.is_ascii_alphanumeric()
-        }) {
-            if self.case_sensitive {
-                normalized.push(character);
+    /// Appends the normalized form of `raw` to an existing buffer.
+    ///
+    /// The caller is responsible for having reserved the [`Self::normalized_len`]
+    /// bytes this appends; building millions of keys into one arena is the
+    /// reason this exists rather than only [`Self::normalize`].
+    pub(super) fn normalize_into(self, raw: &str, out: &mut String) {
+        for character in raw.chars().filter(|character| self.retains(*character)) {
+            if self.case_sensitive || character.is_ascii() {
+                // `char::to_lowercase` is a table lookup returning an iterator.
+                // Keys are overwhelmingly ASCII, and this runs over every key in
+                // the file.
+                out.push(if self.case_sensitive {
+                    character
+                } else {
+                    character.to_ascii_lowercase()
+                });
             } else {
-                normalized.extend(character.to_lowercase());
+                out.extend(character.to_lowercase());
             }
         }
-        Ok(normalized)
+    }
+
+    const fn retains(self, character: char) -> bool {
+        !matches!(self.strip_profile, Some(StripKeyProfile::AsciiAlphanumeric))
+            || !character.is_ascii()
+            || character.is_ascii_alphanumeric()
     }
 
     pub(super) fn normalized_len(self, raw: &str) -> Result<usize> {
         let mut length = 0usize;
-        for character in raw.chars().filter(|character| {
-            !matches!(self.strip_profile, Some(StripKeyProfile::AsciiAlphanumeric))
-                || !character.is_ascii()
-                || character.is_ascii_alphanumeric()
-        }) {
-            if self.case_sensitive {
+        for character in raw.chars().filter(|character| self.retains(*character)) {
+            if self.case_sensitive || character.is_ascii() {
                 length = length
                     .checked_add(character.len_utf8())
                     .ok_or(Error::InvalidFormat("normalized key length overflow"))?;

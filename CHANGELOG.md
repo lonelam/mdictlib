@@ -4,6 +4,29 @@ All notable changes are recorded here.
 
 ## [Unreleased]
 
+### Added
+
+- `MdxFile::prefix_keys`, returning the physical entries whose key starts with a
+  prefix under the header's own normalization, in normalized order.
+- `MdxFile::scan_normalized_keys`, which lends every entry's normalized key in
+  physical order without copying it. Together these let a caller apply its own
+  completion or edit-distance policy across the whole key space without building
+  and retaining a second copy of it.
+
+### Changed
+
+- The key locator holds normalized key text in one arena with `u32` bounds and a
+  single sorted index, in place of a boxed raw *and* normalized string per row
+  plus two sorted indexes. On a 4.36-million-entry, 190 MB MDX this cuts the
+  locator from 300 MiB to 114 MiB and its build from 3.5 s to 1.9 s.
+- `locate` resolves raw-exact matches inside the normalized equal range rather
+  than from a second file-wide index: raw equality implies normalized equality,
+  so no match can lie outside it. Rows are filtered by a raw-text digest and a
+  digest hit is confirmed against its key block, which makes a locate-only hit
+  read one key block that it previously did not. A `locate` immediately followed
+  by reading the entry — the ordinary case — is unchanged, because that block is
+  the one the record read already needed. A locate that misses got faster.
+
 ## [0.2.0] - 2026-08-11
 
 ### Added

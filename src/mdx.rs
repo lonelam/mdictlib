@@ -1,5 +1,6 @@
 use std::fmt;
 use std::iter::FusedIterator;
+use std::ops::ControlFlow;
 use std::path::Path;
 
 use crate::core::{MdictFile, RecordDescriptor, RecordIter};
@@ -179,6 +180,45 @@ impl MdxFile {
         self.inner
             .locate_keys(query)
             .map(|matches| matches.map(KeyMatches::from_located))
+    }
+
+    /// Locates physical entries whose key starts with `prefix` under the
+    /// header's own normalization, in normalized order, stopping after `limit`.
+    ///
+    /// Duplicates are preserved, so a caller presenting completions to a person
+    /// should ask for more than it intends to show and collapse repeats itself.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the global locator cannot be built because key data
+    /// is malformed, unreadable, or exceeds a safety limit.
+    pub fn prefix_keys(&self, prefix: &str, limit: usize) -> Result<Vec<KeyEntry>> {
+        let ordinals = self.inner.locate_prefix(prefix, limit)?;
+        Ok(self
+            .inner
+            .keys_at_ordinals(&ordinals)?
+            .into_iter()
+            .flatten()
+            .collect())
+    }
+
+    /// Visits every entry's normalized key in physical order, without copying
+    /// it, until the callback breaks.
+    ///
+    /// This exists so a caller can apply its own search policy — completion
+    /// ranking, edit distance, transliteration — across the whole key space
+    /// without building and retaining a second copy of it. Resolve a chosen
+    /// [`KeyOrdinal`] back to its original key with [`Self::key_at`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the global locator cannot be built because key data
+    /// is malformed, unreadable, or exceeds a safety limit.
+    pub fn scan_normalized_keys<F>(&self, visit: F) -> Result<()>
+    where
+        F: FnMut(KeyOrdinal, &str) -> ControlFlow<()>,
+    {
+        self.inner.scan_normalized_keys(visit)
     }
 
     /// Looks up and decodes one entry using the dictionary's current key

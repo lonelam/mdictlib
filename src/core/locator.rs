@@ -1,27 +1,45 @@
 use std::cmp::Ordering;
 use std::mem::size_of;
-use std::ops::Range;
+use std::ops::{ControlFlow, Range};
 use std::sync::Arc;
 
 use super::{CachedFailure, CachedValue, MdictFile};
 use crate::error::{Error, Result};
 use crate::limits::{
-    MemoryReservation, checked_usize, ensure_usize_limit, try_clone_string, try_reserve_vec,
+    MemoryReservation, checked_usize, ensure_usize_limit, try_reserve_string_amortized,
+    try_reserve_vec, try_reserve_vec_amortized,
 };
 use crate::types::KeyOrdinal;
 
-#[derive(Debug)]
-struct LocatorRow {
-    raw: Box<str>,
-    normalized: Box<str>,
+/// Every key's normalized text in one allocation, plus the orderings needed to
+/// answer a query.
+///
+/// Storing normalized text alone, rather than a normalized *and* a raw copy per
+/// row, is what keeps this affordable on a multi-million-entry file: a
+/// raw-exact match necessarily normalizes to the same text as its query, so
+/// every raw candidate already lies inside the normalized equal range. The
+/// range is then filtered by a cheap raw-text digest, and only a digest hit
+/// pays for the key block that proves it.
+pub(crate) struct KeyLocator {
+    /// Normalized keys concatenated in physical order.
+    text: Box<str>,
+    /// `bounds[row]..bounds[row + 1]` is that row's slice of `text`.
+    bounds: Box<[u32]>,
+    /// Rows sorted by normalized text, then by physical ordinal.
+    order: Box<[u32]>,
+    /// One digest of each row's *raw* text, in physical order.
+    raw_digest: Box<[u32]>,
+    _memory: MemoryReservation,
 }
 
-#[derive(Debug)]
-pub(crate) struct KeyLocator {
-    rows: Box<[LocatorRow]>,
-    by_raw: Box<[u32]>,
-    by_normalized: Box<[u32]>,
-    _memory: MemoryReservation,
+impl std::fmt::Debug for KeyLocator {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("KeyLocator")
+            .field("rows", &self.order.len())
+            .field("text_bytes", &self.text.len())
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,7 +52,10 @@ pub(crate) enum LocatorBasis {
 pub(crate) struct LocatedKeys {
     locator: Arc<KeyLocator>,
     basis: LocatorBasis,
+    /// The normalized equal range, used whole for a header-normalized match.
     range: Range<usize>,
+    /// Physical ordinals proven raw-exact, when the basis is [`LocatorBasis::RawExact`].
+    exact: Option<Arc<[u32]>>,
 }
 
 impl LocatedKeys {
@@ -43,21 +64,26 @@ impl LocatedKeys {
     }
 
     pub(crate) fn len(&self) -> usize {
-        self.range.len()
+        match &self.exact {
+            Some(exact) => exact.len(),
+            None => self.range.len(),
+        }
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.range.is_empty()
+        self.len() == 0
     }
 
     pub(crate) fn ordinal_at(&self, index: usize) -> Option<KeyOrdinal> {
-        let position = self.range.start.checked_add(index)?;
-        if position >= self.range.end {
-            return None;
-        }
-        let ordinal = match self.basis {
-            LocatorBasis::RawExact => *self.locator.by_raw.get(position)?,
-            LocatorBasis::HeaderNormalized => *self.locator.by_normalized.get(position)?,
+        let ordinal = match &self.exact {
+            Some(exact) => *exact.get(index)?,
+            None => {
+                let position = self.range.start.checked_add(index)?;
+                if position >= self.range.end {
+                    return None;
+                }
+                *self.locator.order.get(position)?
+            }
         };
         Some(KeyOrdinal::new(u64::from(ordinal)))
     }
@@ -66,13 +92,6 @@ impl LocatedKeys {
 impl MdictFile {
     pub(crate) fn locate_keys(&self, query: &str) -> Result<Option<LocatedKeys>> {
         let locator = self.key_locator()?;
-        if let Some(range) = locator.equal_range(LocatorBasis::RawExact, query) {
-            return Ok(Some(LocatedKeys {
-                locator,
-                basis: LocatorBasis::RawExact,
-                range,
-            }));
-        }
 
         let normalized_len = self.normalizer.normalized_len(query)?;
         ensure_usize_limit(
@@ -84,13 +103,125 @@ impl MdictFile {
             .memory
             .reserve(normalized_len, "normalized lookup query")?;
         let normalized = self.normalizer.normalize(query)?;
-        Ok(locator
-            .equal_range(LocatorBasis::HeaderNormalized, &normalized)
-            .map(|range| LocatedKeys {
+
+        let Some(range) = locator.equal_range(&normalized) else {
+            return Ok(None);
+        };
+
+        // Raw-exact still wins over the normalized fallback, but the search for
+        // it is confined to this range: raw equality implies normalized
+        // equality, so nothing outside can be raw-exact.
+        if let Some(exact) = self.raw_exact_within(&locator, &range, query)? {
+            return Ok(Some(LocatedKeys {
                 locator,
-                basis: LocatorBasis::HeaderNormalized,
+                basis: LocatorBasis::RawExact,
                 range,
-            }))
+                exact: Some(exact),
+            }));
+        }
+
+        Ok(Some(LocatedKeys {
+            locator,
+            basis: LocatorBasis::HeaderNormalized,
+            range,
+            exact: None,
+        }))
+    }
+
+    /// Physical ordinals inside `range` whose raw key equals `query`, in
+    /// ascending physical order, or `None` when there are none.
+    fn raw_exact_within(
+        &self,
+        locator: &KeyLocator,
+        range: &Range<usize>,
+        query: &str,
+    ) -> Result<Option<Arc<[u32]>>> {
+        let digest = raw_digest(query);
+        let mut matches: Vec<u32> = Vec::new();
+        for position in range.clone() {
+            let row = *locator.order.get(position).ok_or(Error::InvalidFormat(
+                "locator range escaped its order index",
+            ))?;
+            let index = usize::try_from(row)
+                .map_err(|_| Error::InvalidFormat("locator row index exceeds usize"))?;
+            if *locator
+                .raw_digest
+                .get(index)
+                .ok_or(Error::InvalidFormat("locator row has no raw digest"))?
+                != digest
+            {
+                continue;
+            }
+            // A digest hit is only a candidate; the key block decides.
+            let ordinal = KeyOrdinal::new(u64::from(row));
+            let hit = self
+                .key_entry_at_ordinal(ordinal)?
+                .ok_or(Error::InvalidFormat("locator row has no key block entry"))?;
+            let entry = hit
+                .entries
+                .get(hit.entry_index)
+                .ok_or(Error::InvalidFormat("locator row escaped its key block"))?;
+            if entry.key == query {
+                try_reserve_vec_amortized(&mut matches, 1, "raw-exact locator matches")?;
+                matches.push(row);
+            }
+        }
+        if matches.is_empty() {
+            return Ok(None);
+        }
+        matches.sort_unstable();
+        Ok(Some(Arc::from(matches.into_boxed_slice())))
+    }
+
+    /// Physical ordinals whose normalized key starts with the normalized
+    /// `prefix`, in normalized order, stopping after `limit` of them.
+    pub(crate) fn locate_prefix(&self, prefix: &str, limit: usize) -> Result<Vec<KeyOrdinal>> {
+        let mut found = Vec::new();
+        if limit == 0 {
+            return Ok(found);
+        }
+        let locator = self.key_locator()?;
+
+        let normalized_len = self.normalizer.normalized_len(prefix)?;
+        ensure_usize_limit(
+            "normalized_query_bytes",
+            normalized_len,
+            self.limits.locator_bytes,
+        )?;
+        let _query_memory = self
+            .memory
+            .reserve(normalized_len, "normalized prefix query")?;
+        let normalized = self.normalizer.normalize(prefix)?;
+
+        let start = locator
+            .order
+            .partition_point(|row| locator.row(*row) < normalized.as_str());
+        for row in locator.order.iter().skip(start) {
+            if !locator.row(*row).starts_with(normalized.as_str()) {
+                break;
+            }
+            try_reserve_vec_amortized(&mut found, 1, "prefix locator matches")?;
+            found.push(KeyOrdinal::new(u64::from(*row)));
+            if found.len() == limit {
+                break;
+            }
+        }
+        Ok(found)
+    }
+
+    /// Visits every physical row's normalized key in physical order.
+    pub(crate) fn scan_normalized_keys<F>(&self, mut visit: F) -> Result<()>
+    where
+        F: FnMut(KeyOrdinal, &str) -> ControlFlow<()>,
+    {
+        let locator = self.key_locator()?;
+        for row in 0..locator.row_count() {
+            let ordinal = KeyOrdinal::new(u64::from(row));
+            if visit(ordinal, locator.row(row)).is_break() {
+                break;
+            }
+        }
+        Ok(())
     }
 
     fn key_locator(&self) -> Result<Arc<KeyLocator>> {
@@ -133,13 +264,19 @@ impl MdictFile {
         let entry_count = checked_usize(self.len(), "locator entry count")?;
 
         let fixed_bytes = entry_count
-            .checked_mul(size_of::<LocatorRow>() + 2 * size_of::<u32>())
+            .checked_add(1)
+            .and_then(|bounds| bounds.checked_add(2 * entry_count))
+            .and_then(|slots| slots.checked_mul(size_of::<u32>()))
             .ok_or(Error::InvalidFormat("key locator size overflow"))?;
         enforce_locator_size(fixed_bytes, self.limits.locator_bytes)?;
         let mut retained_memory = self.memory.reserve(fixed_bytes, "key locator")?;
 
-        let mut rows = Vec::new();
-        try_reserve_vec(&mut rows, entry_count, "key locator rows")?;
+        let mut text = String::new();
+        let mut bounds = Vec::new();
+        let mut digests = Vec::new();
+        try_reserve_vec(&mut bounds, entry_count + 1, "key locator bounds")?;
+        try_reserve_vec(&mut digests, entry_count, "key locator raw digests")?;
+        bounds.push(0);
         let mut estimated_bytes = fixed_bytes;
         let mut previous_record_start = None;
 
@@ -166,24 +303,22 @@ impl MdictFile {
                     )));
                 }
                 previous_record_start = Some(entry.record_start);
+
                 let normalized_len = self.normalizer.normalized_len(&entry.key)?;
                 estimated_bytes = estimated_bytes
-                    .checked_add(entry.key.len())
-                    .and_then(|value| value.checked_add(normalized_len))
+                    .checked_add(normalized_len)
                     .ok_or(Error::InvalidFormat("key locator size overflow"))?;
                 enforce_locator_size(estimated_bytes, self.limits.locator_bytes)?;
-                retained_memory.grow(
-                    entry
-                        .key
-                        .len()
-                        .checked_add(normalized_len)
-                        .ok_or(Error::InvalidFormat("key locator size overflow"))?,
-                )?;
-                let normalized = self.normalizer.normalize(&entry.key)?;
-                rows.push(LocatorRow {
-                    raw: try_clone_string(&entry.key, "key locator raw key")?.into_boxed_str(),
-                    normalized: normalized.into_boxed_str(),
-                });
+                retained_memory.grow(normalized_len)?;
+                // Amortized rather than exact: growing by one key at a time
+                // would reallocate the whole arena on every entry.
+                try_reserve_string_amortized(&mut text, normalized_len, "key locator text")?;
+                self.normalizer.normalize_into(&entry.key, &mut text);
+                bounds.push(
+                    u32::try_from(text.len())
+                        .map_err(|_| Error::InvalidFormat("key locator text exceeds u32"))?,
+                );
+                digests.push(raw_digest(&entry.key));
             }
 
             let expected_end = usize::try_from(
@@ -193,40 +328,38 @@ impl MdictFile {
                     .ok_or(Error::InvalidFormat("keyword entry count overflow"))?,
             )
             .map_err(|_| Error::InvalidFormat("keyword entry count exceeds usize"))?;
-            if rows.len() != expected_end {
+            if digests.len() != expected_end {
                 return Err(Error::InvalidData(format!(
                     "locator row count mismatch after block {block_index}: expected {expected_end}, decoded {}",
-                    rows.len()
+                    digests.len()
                 )));
             }
             drop(entries);
         }
 
-        if rows.len() != entry_count {
+        if digests.len() != entry_count {
             return Err(Error::InvalidData(format!(
                 "locator row count mismatch: expected {entry_count}, decoded {}",
-                rows.len()
+                digests.len()
             )));
         }
 
-        let mut by_raw = Vec::new();
-        let mut by_normalized = Vec::new();
-        try_reserve_vec(&mut by_raw, entry_count, "raw locator index")?;
-        try_reserve_vec(&mut by_normalized, entry_count, "normalized locator index")?;
+        let text = text.into_boxed_str();
+        let bounds = bounds.into_boxed_slice();
+        let mut order = Vec::new();
+        try_reserve_vec(&mut order, entry_count, "normalized locator index")?;
         for index in 0..entry_count {
             let index = u32::try_from(index)
                 .map_err(|_| Error::InvalidFormat("locator row index exceeds u32"))?;
-            by_raw.push(index);
-            by_normalized.push(index);
+            order.push(index);
         }
-
-        by_raw.sort_unstable_by(|left, right| compare_rows(&rows, *left, *right, false));
-        by_normalized.sort_unstable_by(|left, right| compare_rows(&rows, *left, *right, true));
+        order.sort_unstable_by(|left, right| compare_rows(&text, &bounds, *left, *right));
 
         Ok(KeyLocator {
-            rows: rows.into_boxed_slice(),
-            by_raw: by_raw.into_boxed_slice(),
-            by_normalized: by_normalized.into_boxed_slice(),
+            text,
+            bounds,
+            order: order.into_boxed_slice(),
+            raw_digest: digests.into_boxed_slice(),
             _memory: retained_memory,
         })
     }
@@ -244,37 +377,50 @@ impl KeyLocator {
         self._memory.bytes()
     }
 
-    fn equal_range(&self, basis: LocatorBasis, query: &str) -> Option<Range<usize>> {
-        let index = match basis {
-            LocatorBasis::RawExact => &self.by_raw,
-            LocatorBasis::HeaderNormalized => &self.by_normalized,
-        };
-        let key = |ordinal: &u32| {
-            let row_index = usize::try_from(*ordinal)
-                .expect("locator ordinal was created from an in-range usize");
-            let row = &self.rows[row_index];
-            match basis {
-                LocatorBasis::RawExact => row.raw.as_ref(),
-                LocatorBasis::HeaderNormalized => row.normalized.as_ref(),
-            }
-        };
-        let start = index.partition_point(|ordinal| key(ordinal) < query);
-        let end = index.partition_point(|ordinal| key(ordinal) <= query);
+    /// The normalized text of one physical row.
+    fn row(&self, row: u32) -> &str {
+        row_text(&self.text, &self.bounds, row)
+    }
+
+    fn row_count(&self) -> u32 {
+        // The build path proved this fits `u32`.
+        self.order.len() as u32
+    }
+
+    fn equal_range(&self, query: &str) -> Option<Range<usize>> {
+        let start = self.order.partition_point(|row| self.row(*row) < query);
+        let end = self.order.partition_point(|row| self.row(*row) <= query);
         (start < end).then_some(start..end)
     }
 }
 
-fn compare_rows(rows: &[LocatorRow], left: u32, right: u32, normalized: bool) -> Ordering {
-    let left = usize::try_from(left).expect("locator ordinal originated as usize");
-    let right = usize::try_from(right).expect("locator ordinal originated as usize");
-    let left_row = &rows[left];
-    let right_row = &rows[right];
-    let key_order = if normalized {
-        left_row.normalized.cmp(&right_row.normalized)
-    } else {
-        left_row.raw.cmp(&right_row.raw)
+fn row_text<'a>(text: &'a str, bounds: &[u32], row: u32) -> &'a str {
+    let index = row as usize;
+    let (Some(start), Some(end)) = (bounds.get(index), bounds.get(index + 1)) else {
+        // Only reachable through a corrupt in-memory index, which the build
+        // path rules out; an empty key simply sorts first.
+        return "";
     };
-    key_order.then_with(|| left.cmp(&right))
+    text.get(*start as usize..*end as usize).unwrap_or_default()
+}
+
+fn compare_rows(text: &str, bounds: &[u32], left: u32, right: u32) -> Ordering {
+    row_text(text, bounds, left)
+        .cmp(row_text(text, bounds, right))
+        .then_with(|| left.cmp(&right))
+}
+
+/// A cheap order-sensitive digest, used only to skip rows that cannot be
+/// raw-exact. Collisions cost one key-block probe, never a wrong answer.
+fn raw_digest(raw: &str) -> u32 {
+    const OFFSET: u32 = 2_166_136_261;
+    const PRIME: u32 = 16_777_619;
+    let mut hash = OFFSET;
+    for byte in raw.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(PRIME);
+    }
+    hash
 }
 
 fn enforce_locator_size(bytes: usize, maximum: usize) -> Result<()> {

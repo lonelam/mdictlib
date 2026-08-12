@@ -1,6 +1,8 @@
 mod support;
 
-use mdictlib::{KeyOrdinal, MatchBasis, MddFile, MdxFile};
+use std::ops::ControlFlow;
+
+use mdictlib::{KeyEntry, KeyOrdinal, MatchBasis, MddFile, MdxFile};
 
 use support::FixtureBuilder;
 
@@ -272,4 +274,69 @@ fn mdd_locator_preserves_duplicate_resource_identity_and_routes_lookup_by_ordina
     let span = dictionary.lookup_span("\\asset.bin").unwrap().unwrap();
     assert_eq!(span.ordinal(), KeyOrdinal::new(0));
     assert_eq!(span.read().unwrap().bytes(), [0x01]);
+}
+
+#[test]
+fn prefix_keys_walk_normalized_order_and_preserve_duplicates() {
+    let fixture = FixtureBuilder::mdx([
+        ("Apple", "one"),
+        ("apple", "two"),
+        ("app-let", "three"),
+        ("Application", "four"),
+        ("banana", "five"),
+    ])
+    .strip_key_attribute("StripKey", "Yes")
+    .key_blocks(vec![2, 2, 1])
+    .build();
+    let dictionary_file = fixture.write("prefix-keys-normalized");
+    let dictionary = MdxFile::open(dictionary_file.path()).unwrap();
+
+    let keys: Vec<String> = dictionary
+        .prefix_keys("APP", 10)
+        .unwrap()
+        .into_iter()
+        .map(KeyEntry::into_key)
+        .collect();
+    assert_eq!(keys, ["Apple", "apple", "app-let", "Application"]);
+
+    // The limit bounds physical rows, duplicates included.
+    assert_eq!(dictionary.prefix_keys("app", 2).unwrap().len(), 2);
+    assert!(dictionary.prefix_keys("app", 0).unwrap().is_empty());
+    assert!(dictionary.prefix_keys("zebra", 10).unwrap().is_empty());
+    // A prefix that only matches after normalization still matches.
+    assert_eq!(dictionary.prefix_keys("applet", 10).unwrap().len(), 1);
+}
+
+#[test]
+fn scan_normalized_keys_visits_physical_order_and_stops_on_break() {
+    let fixture = FixtureBuilder::mdx([("Ice-Cream", "one"), ("beta", "two"), ("GAMMA", "three")])
+        .strip_key_attribute("StripKey", "Yes")
+        .build();
+    let dictionary_file = fixture.write("scan-normalized-keys");
+    let dictionary = MdxFile::open(dictionary_file.path()).unwrap();
+
+    let mut seen = Vec::new();
+    dictionary
+        .scan_normalized_keys(|ordinal, normalized| {
+            seen.push((ordinal.get(), normalized.to_owned()));
+            ControlFlow::Continue(())
+        })
+        .unwrap();
+    assert_eq!(
+        seen,
+        [
+            (0, "icecream".to_owned()),
+            (1, "beta".to_owned()),
+            (2, "gamma".to_owned()),
+        ]
+    );
+
+    let mut visited = 0;
+    dictionary
+        .scan_normalized_keys(|_, _| {
+            visited += 1;
+            ControlFlow::Break(())
+        })
+        .unwrap();
+    assert_eq!(visited, 1);
 }
