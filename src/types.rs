@@ -354,20 +354,20 @@ impl Limits {
     /// Creates the default defensive limit policy.
     pub const fn new() -> Self {
     Self {
-            header_xml_bytes: 16 * 1024 * 1024,
-            header_attributes: 4 * 1024,
-            key_index_bytes: 64 * 1024 * 1024,
-            record_index_bytes: 64 * 1024 * 1024,
-            compressed_block_bytes: 256 * 1024 * 1024,
-            decompressed_block_bytes: 512 * 1024 * 1024,
-            block_metadata_bytes: 64 * 1024 * 1024,
-            key_block_entries: 2_000_000,
-            materialized_record_bytes: 64 * 1024 * 1024,
+            header_xml_bytes: usize::MAX,
+            header_attributes: usize::MAX,
+            key_index_bytes: usize::MAX,
+            record_index_bytes: usize::MAX,
+            compressed_block_bytes: usize::MAX,
+            decompressed_block_bytes: usize::MAX,
+            block_metadata_bytes: usize::MAX,
+            key_block_entries: u64::MAX,
+            materialized_record_bytes: usize::MAX,
             // Keep this effectively unbounded by count; the hard count cap is
             // enforced later by the locator index type.
-            locator_entries: u64::from(u32::MAX),
-            locator_bytes: 512 * 1024 * 1024,
-            working_memory_bytes: 1024 * 1024 * 1024,
+            locator_entries: u64::MAX,
+            locator_bytes: usize::MAX,
+            working_memory_bytes: usize::MAX,
         }
     }
 
@@ -446,7 +446,7 @@ impl Limits {
     /// locator index width (u32).
     #[must_use]
     pub const fn with_unlimited_locator_entries(mut self) -> Self {
-        self.locator_entries = u64::from(u32::MAX);
+        self.locator_entries = u64::MAX;
         self
     }
 
@@ -636,6 +636,7 @@ mod tests {
         let limits = Limits::new()
             .with_locator_entries(1)
             .with_unlimited_locator_entries();
-        assert_eq!(limits.locator_entries(), u64::from(u32::MAX));
+        assert_eq!(limits.locator_entries(), u64::MAX);
     }
 }
+
