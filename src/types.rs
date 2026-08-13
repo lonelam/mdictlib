@@ -186,6 +186,11 @@ impl Header {
     }
 
     /// Returns whether key matching is declared case-sensitive.
+    ///
+    /// When the header omits `KeyCaseSensitive`, MDX uses the historical
+    /// case-insensitive default and MDD uses the sibling `mdx` metadata
+    /// reader's case-sensitive resource-path default. An explicit header
+    /// value overrides either.
     pub const fn key_case_sensitive(&self) -> bool {
         self.key_case_sensitive
     }
@@ -352,22 +357,51 @@ pub struct Limits {
 
 impl Limits {
     /// Creates the default defensive limit policy.
+    ///
+    /// These ceilings are intentionally generous for ordinary dictionaries,
+    /// but still reject hostile file declarations before their corresponding
+    /// read or allocation. Applications that intentionally admit unusually
+    /// large dictionaries can opt into [`Self::large_dictionary`].
     pub const fn new() -> Self {
-    Self {
-            header_xml_bytes: usize::MAX,
-            header_attributes: usize::MAX,
-            key_index_bytes: usize::MAX,
-            record_index_bytes: usize::MAX,
-            compressed_block_bytes: usize::MAX,
-            decompressed_block_bytes: usize::MAX,
-            block_metadata_bytes: usize::MAX,
-            key_block_entries: u64::MAX,
-            materialized_record_bytes: usize::MAX,
-            // Keep this effectively unbounded by count; the hard count cap is
-            // enforced later by the locator index type.
-            locator_entries: u64::MAX,
-            locator_bytes: usize::MAX,
-            working_memory_bytes: usize::MAX,
+        Self {
+            header_xml_bytes: 16 * 1024 * 1024,
+            header_attributes: 4 * 1024,
+            key_index_bytes: 64 * 1024 * 1024,
+            record_index_bytes: 64 * 1024 * 1024,
+            compressed_block_bytes: 256 * 1024 * 1024,
+            decompressed_block_bytes: 512 * 1024 * 1024,
+            block_metadata_bytes: 64 * 1024 * 1024,
+            key_block_entries: 2_000_000,
+            materialized_record_bytes: 64 * 1024 * 1024,
+            locator_entries: 10_000_000,
+            locator_bytes: 512 * 1024 * 1024,
+            working_memory_bytes: 1024 * 1024 * 1024,
+        }
+    }
+
+    /// Creates a finite policy for unusually large dictionaries on modern
+    /// 64-bit hosts.
+    ///
+    /// Limits are ceilings rather than preallocations. This preset is based on
+    /// a measured 4,362,467-entry, 190 MB MDX whose populated locator retains
+    /// about 121 MB; it leaves substantial per-section and working-memory
+    /// headroom while preserving limit-before-read and limit-before-allocation
+    /// behavior. Host applications should still apply an aggregate budget when
+    /// opening many files.
+    pub const fn large_dictionary() -> Self {
+        Self {
+            header_xml_bytes: 64 * 1024 * 1024,
+            header_attributes: 16 * 1024,
+            key_index_bytes: 512 * 1024 * 1024,
+            record_index_bytes: 512 * 1024 * 1024,
+            compressed_block_bytes: 1024 * 1024 * 1024,
+            decompressed_block_bytes: 2 * 1024 * 1024 * 1024,
+            block_metadata_bytes: 512 * 1024 * 1024,
+            key_block_entries: 16_000_000,
+            materialized_record_bytes: 512 * 1024 * 1024,
+            locator_entries: u32::MAX as u64,
+            locator_bytes: 1024 * 1024 * 1024,
+            working_memory_bytes: 2 * 1024 * 1024 * 1024,
         }
     }
 
@@ -638,5 +672,33 @@ mod tests {
             .with_unlimited_locator_entries();
         assert_eq!(limits.locator_entries(), u64::MAX);
     }
-}
 
+    #[test]
+    fn large_dictionary_policy_is_finite_and_looser_than_default() {
+        let default = Limits::new();
+        let large = Limits::large_dictionary();
+
+        assert!(large.header_xml_bytes() > default.header_xml_bytes());
+        assert!(large.key_index_bytes() > default.key_index_bytes());
+        assert!(large.materialized_record_bytes() > default.materialized_record_bytes());
+        assert!(large.locator_bytes() > default.locator_bytes());
+        assert!(large.working_memory_bytes() > default.working_memory_bytes());
+        assert!(large.locator_entries() > default.locator_entries());
+        for value in [
+            large.header_xml_bytes(),
+            large.header_attributes(),
+            large.key_index_bytes(),
+            large.record_index_bytes(),
+            large.compressed_block_bytes(),
+            large.decompressed_block_bytes(),
+            large.block_metadata_bytes(),
+            large.materialized_record_bytes(),
+            large.locator_bytes(),
+            large.working_memory_bytes(),
+        ] {
+            assert_ne!(value, usize::MAX);
+        }
+        assert_ne!(large.key_block_entries(), u64::MAX);
+        assert_ne!(large.locator_entries(), u64::MAX);
+    }
+}

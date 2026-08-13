@@ -263,9 +263,14 @@ impl MdictFile {
         }
         let entry_count = checked_usize(self.len(), "locator entry count")?;
 
-        let fixed_bytes = entry_count
+        let bound_slots = entry_count
             .checked_add(1)
-            .and_then(|bounds| bounds.checked_add(2 * entry_count))
+            .ok_or(Error::InvalidFormat("key locator size overflow"))?;
+        let order_and_digest_slots = entry_count
+            .checked_mul(2)
+            .ok_or(Error::InvalidFormat("key locator size overflow"))?;
+        let fixed_bytes = bound_slots
+            .checked_add(order_and_digest_slots)
             .and_then(|slots| slots.checked_mul(size_of::<u32>()))
             .ok_or(Error::InvalidFormat("key locator size overflow"))?;
         enforce_locator_size(fixed_bytes, self.limits.locator_bytes)?;
@@ -274,7 +279,7 @@ impl MdictFile {
         let mut text = String::new();
         let mut bounds = Vec::new();
         let mut digests = Vec::new();
-        try_reserve_vec(&mut bounds, entry_count + 1, "key locator bounds")?;
+        try_reserve_vec(&mut bounds, bound_slots, "key locator bounds")?;
         try_reserve_vec(&mut digests, entry_count, "key locator raw digests")?;
         bounds.push(0);
         let mut estimated_bytes = fixed_bytes;

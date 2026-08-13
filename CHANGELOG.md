@@ -6,6 +6,33 @@ All notable changes are recorded here.
 
 ### Added
 
+- `Limits::large_dictionary()`, a finite, opt-in high-headroom policy for
+  unusually large dictionaries.
+
+### Fixed
+
+- Header XML accepts both standard attribute quote styles and both `&#x...;`
+  and `&#X...;` hexadecimal entities, rejects odd UTF-16LE lengths before
+  decoding, and rejects content after the one top-level header tag.
+- Version 1 and 2 MDD headers that omit `KeyCaseSensitive` now use the
+  case-sensitive resource-path default used by the sibling `mdx` metadata
+  reader; explicit header values still win, and the MDX default remains
+  unchanged. Reader-specific MDD sort-key folding remains outside this fix.
+- MDD lookup now treats leading separators and `/` versus `\\` as equivalent
+  resource-path spelling differences, so callers do not need a compatibility
+  retry ladder.
+- Restored finite default parser ceilings after the temporary unlimited policy;
+  the large-dictionary preset keeps the TLD-sized workload supported without
+  making untrusted opens unbounded.
+- Complete `GeneratedByEngineVersion` and `RequiredEngineVersion` spellings are
+  validated in the parser, future required majors are refused, and incoherent
+  version 1-generated/version 2-required headers are rejected. Dispatch still
+  uses `GeneratedByEngineVersion` exactly once.
+
+## [0.2.2] - 2026-08-12
+
+### Added
+
 - `MdxFile::prefix_keys`, returning the physical entries whose key starts with a
   prefix under the header's own normalization, in normalized order.
 - `MdxFile::scan_normalized_keys`, which lends every entry's normalized key in
@@ -26,6 +53,19 @@ All notable changes are recorded here.
   read one key block that it previously did not. A `locate` immediately followed
   by reading the entry — the ordinary case — is unchanged, because that block is
   the one the record read already needed. A locate that misses got faster.
+
+## [0.2.1] - 2026-08-12
+
+### Added
+
+- `Limits::with_unlimited_locator_entries()` for callers that intentionally
+  rely only on the locator's internal `u32` row width.
+
+### Changed
+
+- Temporarily changed default parser ceilings to unlimited values. The current
+  unreleased changes restore finite defaults and add a separate large-file
+  choice.
 
 ## [0.2.0] - 2026-08-11
 
@@ -55,7 +95,8 @@ All notable changes are recorded here.
   cross-version grammar retry.
 - Unsupported major versions now report `MDict format major version other than
   1 or 2`. Version resolution still keys on `GeneratedByEngineVersion`,
-  unchanged from `0.1.0`.
+  unchanged from `0.1.0`; `RequiredEngineVersion` is validated independently
+  and cannot redirect dispatch.
 
 This restructuring is behavior-preserving for version 2: the public API is
 byte-for-byte identical to `v0.1.0`, and version 2 corpus entry counts, key
@@ -187,6 +228,8 @@ digests, and payload digests are unchanged.
   to the library, examples, tests, documentation, and license material.
 - Released version `0.1.0` as the first public release.
 
-[Unreleased]: https://github.com/lonelam/mdictlib/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/lonelam/mdictlib/compare/v0.1.0...v0.2.0
+[Unreleased]: https://github.com/lonelam/mdictlib/compare/bc72444...HEAD
+[0.2.2]: https://github.com/lonelam/mdictlib/compare/fe22dfd...bc72444
+[0.2.1]: https://github.com/lonelam/mdictlib/compare/ad4afaa...fe22dfd
+[0.2.0]: https://github.com/lonelam/mdictlib/compare/v0.1.0...ad4afaa
 [0.1.0]: https://github.com/lonelam/mdictlib/tree/v0.1.0

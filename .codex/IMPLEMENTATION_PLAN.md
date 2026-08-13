@@ -1,16 +1,17 @@
 # mdictlib Implementation Roadmap
 
-Last updated: 2026-08-11 (v0.2.0 selected)
+Last updated: 2026-08-13 (v0.2.2 current; unreleased fixes in progress)
 
 ## 1. Release State And Active Program
 
 `mdictlib` `0.1.0` is the first public release and supports MDict major version
 2 only. Every milestone in the released roadmap (sections 6 and 10) is complete.
 
-The **MDict version 1 compatibility program is implemented** in the working
-tree. Milestones 1 through 6 are complete; milestone 7 is complete except for
-publishing. Crate metadata and `CHANGELOG.md` select **`0.2.0`**; nothing has
-been published, tagged, or pushed.
+The **MDict version 1 compatibility program is implemented**. Milestones 1
+through 6 are complete, and its `0.2.0` release decision is historical. Crate
+metadata and crates.io are now at **`0.2.2`**; the repository still exposes
+only the `v0.1.0` tag. Any future publish, tag, or push remains an explicit
+maintainer action.
 
 Real version 1 MDD evidence is complete: 16 candidates were acquired under an
 explicitly approved bounded proposal and all 16 passed full validation, 14 of
@@ -303,7 +304,7 @@ This is concrete function-pointer dispatch: monomorphic, non-capturing, no
   exact-length and checksum rules apply identically. If a v1 file proves to use
   a different envelope, that is a finding for section 8.3, not a fallback.
 
-## 5. Public API Contract (unchanged by the v1 program)
+## 5. Public API Contract (unchanged at the v1 cutover)
 
 ### Physical identity
 
@@ -324,9 +325,24 @@ snapshot.
 
 Known logical header attributes are resolved ASCII-case-insensitively while
 raw spellings remain inspectable. Semantically equivalent aliases are accepted
-and conflicting aliases are rejected. When `StripKey` is enabled, comparison
-removes non-alphanumeric ASCII code points and leaves non-ASCII characters
-unchanged; case folding remains controlled separately by the header.
+and conflicting aliases are rejected. Both XML attribute quote styles and
+both cases of hexadecimal numeric entities are accepted, but content after the
+one top-level header element is rejected; a matching empty closing tag remains
+compatible. When `KeyCaseSensitive` is omitted,
+supported MDD files default to case-sensitive resource paths while MDX keeps
+its historical case-insensitive default; explicit values override either
+default. This follows the sibling `mdx` metadata default; reader-specific MDD
+sort-key folding remains a separate compatibility question. When `StripKey` is
+enabled, comparison removes non-alphanumeric ASCII
+code points and leaves non-ASCII characters unchanged; case folding remains
+controlled separately by the header.
+MDD lookup also treats an optional leading separator and `/` versus `\\` as
+equivalent resource-path spelling, keeping that compatibility behavior in the
+shared normalizer rather than in an application adapter.
+`GeneratedByEngineVersion` remains the sole grammar-dispatch authority;
+`RequiredEngineVersion` is validated independently for complete numeric
+spelling, supported major range, and the v1-generated/v2-required conflict,
+but never selects a grammar.
 
 ### MDX
 
@@ -355,6 +371,9 @@ each decoded block remains bounded.
 
 - `OpenOptions` is reusable by reference and owns a `Limits` policy;
 - all public limit builders are wired to parser boundaries;
+- `Limits::new()` is finite; `Limits::large_dictionary()` is an explicit,
+  finite high-headroom preset measured against the 4,362,467-entry TLD sample;
+  aggregate multi-file budgets remain an application responsibility;
 - `MemoryUsage` reports conservative accounted current/peak, metadata,
   locator, and cache estimates;
 - `Passcode::new()` validates borrowed input before cloning, bounds the user
@@ -581,32 +600,27 @@ Each remains a hypothesis until independently exercised by synthetic fixtures
 
 #### Open disagreements and unknowns
 
-1. `GeneratedByEngineVersion` versus `RequiredEngineVersion` as the
-   authoritative dispatch attribute. **Regression-critical:** today's
-   `is_v2()` reads `GeneratedByEngineVersion`, and `RequiredEngineVersion`
-   defaults to it when absent. Changing the attribute changes which files are
-   accepted as v2 and can silently move corpus artifacts between classes.
-   Section 9 gates this.
-2. Missing, malformed, conflicting, or unusual version strings.
-3. Missing `Encoding` defaults: readers disagree between UTF-8 and UTF-16LE.
+1. Missing `Encoding` defaults: readers disagree between UTF-8 and UTF-16LE.
    `mdictlib` currently defaults MDX to UTF-8
-   ([`src/format/encoding.rs:21`](../src/format/encoding.rs:21)).
-4. Real versions other than 1.2. All 453 local v1 files declare exactly 1.2, so
+   ([`src/format/common/encoding.rs:21`](../src/format/common/encoding.rs:21)).
+   This remains a separately scoped compatibility decision because changing it
+   changes key and record decoding for files that omit the attribute.
+2. Real versions other than 1.2. All 453 local v1 files declare exactly 1.2, so
    the local corpus provides **no** evidence about 1.0 or 1.1.
-5. Empty v1 sections (zero key blocks, zero record blocks, zero entries).
-6. v1 encryption flags and passcode behavior. All 453 local files declare
+3. Empty v1 sections (zero key blocks, zero record blocks, zero entries).
+4. v1 encryption flags and passcode behavior. All 453 local files declare
    `Encrypted=No`, so the local corpus provides **no** v1 encryption evidence.
-7. Whether key-info encryption exists in real v1 files at all.
-8. Real v1 zlib blocks.
-9. Uncompressed v1 record blocks.
-10. Exact LZO termination, checksum, and trailing-input rules.
-11. Records crossing decoded record-block boundaries in v1.
-12. ISO-8859-1 behavior — 11 local files declare it, and it is **not** in
-    `mdictlib`'s supported encoding set today
-    ([`src/format/encoding.rs:8`](../src/format/encoding.rs:8)), so those
-    files would be rejected as `Unsupported("text encoding")` even with a
-    working v1 grammar. Adding it is a separate scoped decision.
-13. Creator-specific variants and malformed historical files.
+5. Whether key-info encryption exists in real v1 files at all.
+6. Real v1 zlib blocks.
+7. Uncompressed v1 record blocks.
+8. Exact LZO termination, checksum, and trailing-input rules.
+9. Records crossing decoded record-block boundaries in v1.
+10. ISO-8859-1 behavior — 11 local files declare it, and it is **not** in
+   `mdictlib`'s supported encoding set today
+    ([`src/format/common/encoding.rs:8`](../src/format/common/encoding.rs:8)), so those
+   files would be rejected as `Unsupported("text encoding")` even with a
+   working v1 grammar. Adding it is a separate scoped decision.
+11. Creator-specific variants and malformed historical files.
 
 ### 8.4 Milestones
 
@@ -659,7 +673,8 @@ still absent.
 - Re-point `src/fuzzing.rs` and the fuzz targets at the moved module paths.
 
 Exit: every existing v2 test, corpus hash, limit, lazy behavior, and benchmark
-is unchanged (section 9), and a public API diff against `v0.1.0` is empty.
+is unchanged (section 9), and the version-1 cutover public API diff against
+`v0.1.0` is empty. Later additive patch-release APIs are tracked separately.
 
 #### Milestone 3 — Independent synthetic v1 fixtures
 
@@ -730,7 +745,7 @@ authorization.
 | 4. Implement `format::v1` | complete | Only evidence-backed grammar. Encryption and ISO8859-1 refused precisely. |
 | 5. Safety and fuzzing | complete | Ten fuzz targets under AddressSanitizer, including `v1_whole_file`, `v1_truncation`, and `version_dispatch`; mutation and truncation sweeps over whole v1 MDX and MDD files. |
 | 6. Corpus and differential validation | complete | 407 of 453 real artifacts fully validated; 46 rejected with retained classifications; two independent observations agree on all 453. Differential against one independent lineage with zero unexplained disagreements. |
-| 7. MDD validation, documentation, release decision | MDD and docs complete; **`0.2.0` selected** | README, STATUS, this roadmap, `CHANGELOG.md`, and crate rustdoc updated. Crate version is `0.2.0`; publish/tag/push still require authorization. |
+| 7. MDD validation, documentation, release decision | MDD and docs complete; the historical `0.2.0` decision was followed by compatible `0.2.1`/`0.2.2` releases | README, STATUS, this roadmap, `CHANGELOG.md`, and crate rustdoc are synchronized; current unreleased fixes remain subject to maintainer release authorization. |
 
 ### 8.6 What was learned that changed the plan
 
@@ -786,7 +801,7 @@ All are enforced by `tests/architecture.rs` and **pass**.
 | every accepted v1 artifact completes ordinal, raw-lookup, duplicate, and payload validation | pass — 407 of 453 |
 | every rejected artifact has a structured retained classification | pass — 46 of 46 |
 | malformed input cannot panic or bypass limits | pass — mutation and truncation sweeps plus ten AddressSanitizer fuzz targets |
-| public API diff against `v0.1.0` is empty | pass — 126 items identical |
+| public API diff at the version 1 cutover is empty | pass — 126 items identical; later `0.2.2` scan/completion methods and the unreleased large-limit preset are compatible additions |
 | benchmark baseline within its 2x diagnostic threshold | **not re-measured**; the checked-in baseline predates this work |
 | real v1 MDD validation | pass — 16 of 16 acquired artifacts fully validated |
 
@@ -805,8 +820,11 @@ The original gate list, for reference:
   payload or MDD span/stream validation.
 - Every rejected artifact has a structured retained classification.
 - Malformed input cannot panic or bypass limits.
-- No public API change unless separately approved under the `0.x` policy; a
-  public API diff against `v0.1.0` must be empty.
+- No breaking public API change unless separately approved under the `0.x`
+  policy; compatible additive APIs are recorded in the changelog and must not
+  alter the version-1 cutover contract. The current Required-version checks
+  centralize the AALookup adapter's former preflight policy; they do not change
+  which grammar `GeneratedByEngineVersion` selects.
 
 ### Gated decisions
 
@@ -814,9 +832,12 @@ Two decisions may change which files `mdictlib` accepts and must not be made as
 a side effect of refactoring:
 
 1. **Dispatch attribute.** Any change from `GeneratedByEngineVersion` to
-   `RequiredEngineVersion`, or to a combination, requires re-running the
-   exhaustive corpus audit and comparing the full outcome ledger before and
-   after. A change in any artifact's class blocks the change until reviewed.
+   `RequiredEngineVersion`, or any future change that lets the requirement
+   select a grammar, requires re-running the exhaustive corpus audit and
+   comparing the full outcome ledger before and after. The current parser only
+   centralizes the adapter's pre-existing malformed/future/conflict checks;
+   it never lets the requirement select a grammar. A change in any artifact's
+   class still blocks a future dispatch change until reviewed.
 2. **ISO-8859-1 support.** Adding it changes the supported-encoding set and
    affects 11 local v1 files. It is a separate scoped decision with its own
    fixtures, not part of milestone 4.
@@ -937,13 +958,13 @@ completed the full audit. Exhaustive duplicate checking was changed to validate
 each complete duplicate group once and use logarithmic membership probes, with
 a dedicated large noncontiguous-duplicate regression.
 
-**MDD evidence gap.** No MDD file is present in the reviewed local selection.
-The tracked inventory holds 335 discovery-only MDD URLs, of which 16 are
-exact-stem candidates paired with v1 MDX rows totaling 59,842,819 advertised
-bytes. They are not authorized, acquired, or version-inspected. A separate
-explicit local-testing and license review must precede acquisition. Until it
-happens, every v1 MDD claim in this roadmap rests on synthetic fixtures and
-reader behavior alone.
+**MDD evidence status.** The initial reviewed selection contained no MDD
+payloads. A subsequent, explicitly approved local-testing and license review
+acquired 16 exact-stem candidates under the bounded workflow described above;
+all 16 were version-inspected and passed the real-file audit (14 declared
+version 1.2 and 2 declared version 2.0). The remaining 335 inventory rows are
+discovery-only and are not parser evidence. This narrow sample does not
+generalize to every MDD producer or extension variant.
 
 CI covers schemas, deterministic transformations, bounded local acquisition
 fixtures, manifest parsing, isolated-runner failure handling, and synthetic

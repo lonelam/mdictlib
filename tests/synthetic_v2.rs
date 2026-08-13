@@ -25,6 +25,49 @@ fn unsupported_major_version_wins_over_its_legacy_encoding_label() {
 }
 
 #[test]
+fn generated_version_remains_dispatch_authority_while_required_version_is_validated() {
+    let compatible = FixtureBuilder::mdx([("alpha", "record")])
+        .engine_versions("2.0", "1.2")
+        .build();
+    let compatible_file = compatible.write("generated-v2-required-v1");
+    let dictionary = MdxFile::open(compatible_file.path()).unwrap();
+    assert_eq!(dictionary.header().generated_by_engine_version(), "2.0");
+    assert_eq!(dictionary.header().required_engine_version(), "1.2");
+
+    let future_required = FixtureBuilder::mdx([("alpha", "record")])
+        .engine_versions("2.0", "3.0")
+        .build();
+    let future_required_file = future_required.write("future-required-version");
+    assert!(matches!(
+        MdxFile::open(future_required_file.path()),
+        Err(Error::Unsupported(
+            "required MDict engine major version other than 1 or 2"
+        ))
+    ));
+
+    let malformed_required = FixtureBuilder::mdx([("alpha", "record")])
+        .engine_versions("2.0", "2.bad")
+        .build();
+    let malformed_required_file = malformed_required.write("malformed-required-version");
+    assert!(matches!(
+        MdxFile::open(malformed_required_file.path()),
+        Err(Error::InvalidFormat("malformed RequiredEngineVersion"))
+    ));
+
+    let unsupported_generated = FixtureBuilder::mdx([("alpha", "record")])
+        .engine_versions("3.0", "2.bad")
+        .build();
+    let unsupported_generated_file =
+        unsupported_generated.write("unsupported-generated-precedence");
+    assert!(matches!(
+        MdxFile::open(unsupported_generated_file.path()),
+        Err(Error::Unsupported(
+            "MDict format major version other than 1 or 2"
+        ))
+    ));
+}
+
+#[test]
 fn iso8859_1_is_refused_precisely_instead_of_being_mapped_to_another_encoding() {
     // Real v1.2 dictionaries declare this label. Which byte semantics their
     // creators used is unresolved, so the reader must say so rather than

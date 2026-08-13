@@ -16,7 +16,9 @@ dictionaries and `.mdd` resource dictionaries.
 - MDD spans are source-bound and can stream without exposing raw offsets or
   materializing a whole resource.
 - Per-open `Limits` and aggregate working-memory accounting bound untrusted
-  reads, decompression, allocation, locator construction, and materialization.
+  reads, decompression, allocation, locator construction, and materialization;
+  `Limits::new()` is finite and `Limits::large_dictionary()` is an explicit
+  high-headroom preset for modern hosts.
 - Unsafe code is forbidden.
 
 ## Supported Scope
@@ -77,14 +79,14 @@ prefix/fuzzy search, mmap, and persistent sidecars are out of scope.
 
 ```toml
 [dependencies]
-mdictlib = "0.2.0"
+mdictlib = "0.2.2"
 ```
 
 Enable LZO when required by a dictionary:
 
 ```toml
 [dependencies]
-mdictlib = { version = "0.2.0", features = ["lzo"] }
+mdictlib = { version = "0.2.2", features = ["lzo"] }
 ```
 
 ## MDX
@@ -196,7 +198,7 @@ Ordinals are stable only for the same unchanged dictionary file snapshot.
 use mdictlib::{Limits, MdxFile, OpenOptions};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let limits = Limits::new()
+    let limits = Limits::large_dictionary()
         .with_materialized_record_bytes(16 * 1024 * 1024)
         .with_locator_bytes(256 * 1024 * 1024)
         .with_working_memory_bytes(512 * 1024 * 1024);
@@ -213,6 +215,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+`Limits::new()` provides the finite defensive policy used by default. The
+optional large-dictionary preset is still a set of ceilings, not a
+preallocation: it is sized from a measured 4,362,467-entry, 190 MB MDX that
+retained about 121 MB after lookup indexing. Ten comparable dictionaries need
+about 1.21 GB of retained memory before application overhead, so an application
+opening many files should add its own aggregate budget as AALookup does. The
+preset is an additive API in the current working tree and will become available
+to registry consumers only with an authorized follow-up release.
 
 `MemoryUsage` values are conservative parser budget estimates, not allocator or
 operating-system RSS. Payloads already returned to the caller are excluded.

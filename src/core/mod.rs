@@ -206,7 +206,7 @@ impl MdictFile {
         let limits = options.limits.clone();
         let memory = Arc::new(MemoryBudget::new(limits.working_memory_bytes));
         let layout = open_layout(&source, kind, options, &memory)?;
-        let normalizer = KeyNormalizer::from_header(&layout.header);
+        let normalizer = KeyNormalizer::from_header(&layout.header, kind);
 
         Ok(Self {
             kind,

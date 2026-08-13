@@ -309,6 +309,21 @@ fn a_v2_header_with_a_v1_body_fails_without_retrying_the_other_grammar() {
     );
 }
 
+#[test]
+fn a_v1_generated_version_cannot_require_a_v2_reader() {
+    let fixture = V1FixtureBuilder::mdx([("alpha", "record")])
+        .engine_versions("1.2", "2.0")
+        .coding(V1BlockCoding::None)
+        .build();
+    let file = fixture.write("v1-generated-v2-required");
+    assert!(matches!(
+        MdxFile::open(file.path()),
+        Err(Error::InvalidFormat(
+            "GeneratedByEngineVersion 1 conflicts with RequiredEngineVersion"
+        ))
+    ));
+}
+
 // ---------------------------------------------------------------------------
 // Malformed version 1 files
 // ---------------------------------------------------------------------------

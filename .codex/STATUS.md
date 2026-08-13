@@ -1,23 +1,24 @@
 # mdictlib Status
 
-Last updated: 2026-08-11 (v0.2.0 selected)
+Last updated: 2026-08-13 (v0.2.2 current; unreleased fixes in progress)
 
 ## Current Snapshot
 
-- `mdictlib` `0.2.0` is the selected crate version for MDict major version 1
-  MDX and MDD support. `0.1.0` remains the last published release on crates.io.
+- `mdictlib` `0.2.2` is the current crate version and the current crates.io
+  release. It supports MDict major versions 1 and 2 for MDX and MDD.
 - Version 1 support is implemented, tested against independent synthetic
   fixtures, fuzzed, and validated against 453 authorized real v1.2 MDX
   artifacts. **407 of 453 complete full validation**; every rejected artifact
   carries a structured retained classification.
-- **Publishing, tagging, and pushing `0.2.0` are not authorized yet.** The
-  crate version and changelog are synchronized; external release actions still
-  require explicit maintainer authorization.
+- The current compatibility and limit fixes are unreleased. Publishing,
+  tagging, or pushing another release still requires explicit maintainer
+  authorization.
 - Real v1 MDD is **validated**: 16 approved artifacts were acquired into the
   ignored cache and all 16 passed full validation, 14 of them declaring
   version 1.2.
 - The canonical repository is `https://github.com/lonelam/mdictlib`; the
-  released tag is `v0.1.0` and `0.1.0` is published through crates.io.
+  repository's only release tag is `v0.1.0`, while `0.2.2` is published through
+  crates.io.
 - Rust is pinned to `1.97.1`; MSRV is `1.97`, edition 2024.
 - MDX and MDD, and both wire versions, use one defensive, file-backed parser
   core. The wire version is resolved once during open and never reaches lookup,
@@ -25,18 +26,19 @@ Last updated: 2026-08-11 (v0.2.0 selected)
 - Header and block indexes are parsed eagerly under limits; key and record
   blocks are decoded lazily.
 - Unsafe code is forbidden.
-- The public API is byte-for-byte identical to `v0.1.0`.
+- The version 1 refactor preserved the `v0.1.0` API. Version `0.2.2` later
+  added compatible `MdxFile` scan/completion methods, and the unreleased work
+  adds the compatible `Limits::large_dictionary()` constructor.
 - Public corpus metadata and acquisition tooling are tracked separately from
   ignored, locally authorized dictionary bytes under `.corpus/`.
 
 ## 0.x Compatibility Policy
 
-The `0.1.0` public API is a published contract. Compatible fixes use patch
-releases. Intentional breaking public-API changes require a minor version bump
-and a changelog entry; local-only predecessor shapes remain irrelevant. Adding
-v1 support must not change the public API, and a public API diff against
-`v0.1.0` must stay empty. `0.2.0` is a minor bump for version 1 support
-without a public-API break.
+The `0.1.0` public API is a published contract. Compatible fixes and additive
+APIs use patch releases. Intentional breaking public-API changes require a
+minor version bump and a changelog entry; local-only predecessor shapes remain
+irrelevant. The `0.2.0` version 1 program itself made no public-API change.
+Subsequent compatible additions are tracked explicitly in the changelog.
 
 ## Architecture
 
@@ -116,8 +118,24 @@ version enum in the core, no per-entry branch, and no trait object.
   ordinal access.
 - Known header attributes are ASCII-case-insensitive, semantically equivalent
   aliases are accepted, and conflicts are rejected.
+- Header attributes accept either XML quote style and uppercase or lowercase
+  hexadecimal numeric entities. Only one top-level header element is accepted;
+  non-whitespace trailing content is rejected, while a matching empty closing
+  tag remains compatible.
+- When `KeyCaseSensitive` is omitted, supported MDD files default to
+  case-sensitive resource paths while MDX retains its historical
+  case-insensitive default. Omitted `StripKey` remains disabled for both.
+  This follows the sibling `mdx` metadata default; other readers may still
+  fold MDD sort keys independently of that metadata, so this is not a claim
+  of universal cross-reader sort-key parity.
 - `StripKey` removes non-alphanumeric ASCII for comparison while preserving
   non-ASCII characters; case sensitivity remains an independent header flag.
+- MDD resource lookup normalizes optional leading separators and `/` versus
+  `\\` spelling in the shared core, so callers do not need a retry ladder.
+- `GeneratedByEngineVersion` remains the sole grammar-dispatch authority;
+  `RequiredEngineVersion` is validated independently for complete numeric
+  spelling, supported major range, and impossible v1-generated/v2-required
+  combinations.
 
 ### MDX
 
@@ -144,6 +162,10 @@ version enum in the core, no per-entry branch, and no trait object.
 - Limits cover header XML/attributes, indexes, block metadata, compressed and
   decoded blocks, per-block key counts, materialized records, locator rows and
   bytes, and aggregate working memory.
+- `Limits::new()` is finite again after the temporary unlimited policy. The
+  explicit `Limits::large_dictionary()` preset is finite and sized from the
+  measured 4,362,467-entry TLD sample (about 121 MB retained after indexing),
+  while applications opening many files still need an aggregate budget.
 - `MemoryUsage` exposes conservative accounted current/peak work plus metadata,
   locator, key-cache, and record-cache estimates.
 - Aggregate reservations are returned through RAII and concurrent successful
@@ -192,8 +214,10 @@ Version 1:
 | LZO block without the `lzo` feature | `Unsupported("LZO compressed blocks (enable the `lzo` feature)")` |
 
 **Not claimed:** encrypted v1, zlib-v1 creator compatibility (the shared
-envelope decodes it, but no authorized artifact was observed using it),
-ISO8859-1, and real v1 MDD.
+envelope decodes it, but no authorized artifact was observed using it), and
+ISO8859-1. Real v1 MDD support is evidence-backed for the bounded 16-file
+sample documented below, but that sample is not a claim about every MDD
+producer or extension variant.
 
 Independent full-file fixtures cover every supported encoding, none/zlib/LZO,
 both encrypted paths, mixed compression, multiple key/record blocks, duplicate
@@ -244,10 +268,25 @@ Local gates on 2026-08-11, after version 1 support landed:
 
 The three ignored tests are the explicit private-corpus tests, unchanged.
 
+Current compatibility/limit pass on 2026-08-13:
+
+- `cargo fmt --all -- --check`: passed
+- `cargo test --locked --all-features`: 59 library tests plus all integration
+  suites passed; only the three private-corpus tests remain ignored
+- `cargo clippy --locked --all-targets --all-features -- -D warnings`: passed
+- the measured 4,362,467-entry TLD sample opened and looked up `apple` in the
+  release example (`entries=4,362,467`)
+
+The historical v1 gate counts above remain retained as the independently dated
+2026-08-11 evidence snapshot; the current pass adds the compatibility and
+finite-limit changes described in this status file.
+
 ### Regression evidence against the pre-v1 baseline
 
-- **Public API**: a source-level comparison of every public item reachable from
-  `lib.rs` against the `v0.1.0` worktree is **identical** (126 items).
+- **Public API at the version 1 cutover**: a source-level comparison of every
+  public item reachable from `lib.rs` against the `v0.1.0` worktree was
+  **identical** (126 items). The later `0.2.2` scan/completion methods and the
+  unreleased large-dictionary preset are deliberate compatible additions.
 - **Version 2 corpus logical facts**: eight v2 artifacts audited with
   `examples/corpus_audit` under both the pre-refactor build (`1b3f6bb`) and the
   current build produced **byte-identical** entry counts, key digests, and
@@ -626,9 +665,10 @@ baselines the v1 program must not regress.
 ## Release Hygiene
 
 - `.github/workflows/ci.yml` exists.
-- `CHANGELOG.md` has dated `0.1.0` and `0.2.0` release notes.
+- `CHANGELOG.md` records `0.1.0`, `0.2.0`, `0.2.1`, and `0.2.2` plus the
+  current unreleased changes.
 - `README.md`, crate rustdoc, examples, public API tests, and package metadata
-  describe the same selected `0.2.0` behavior.
+  describe the same current `0.2.2` dependency baseline and unreleased API.
 - `Cargo.toml` has `autobins = false` and a deliberate package include list.
 - Private corpus bytes, private manifests, temporary files, benchmark raw
   output, and `draft/` are not packaged.
@@ -641,13 +681,12 @@ baselines the v1 program must not regress.
 
 - Source: `https://github.com/lonelam/mdictlib`
 - Tag: `https://github.com/lonelam/mdictlib/tree/v0.1.0`
-- Package: `https://crates.io/crates/mdictlib/0.1.0`
+- Package: `https://crates.io/crates/mdictlib/0.2.2`
 
-**`0.2.0` is selected in crate metadata and the changelog.** Publishing the
-package, creating `v0.2.0`, and pushing still require the same release gates
-plus the v1 exit gates in `.codex/IMPLEMENTATION_PLAN.md` section 9, and
-explicit maintainer authorization. Nothing has been published, tagged, or
-pushed for `0.2.0`.
+`0.2.2` is published on crates.io and selected in crate metadata. The Git
+repository currently exposes only the `v0.1.0` release tag. Creating missing or
+future tags, publishing another package, and pushing release state remain
+explicit maintainer actions.
 
 ## Active TODOs
 
@@ -659,13 +698,14 @@ pushed for `0.2.0`.
    `scripts/corpus/audit-v1.mjs` today, but its report is not committed.
 3. Re-run the checked-in benchmark harness on the recorded host to refresh the
    performance baseline; the 2026-08-10 numbers predate this work.
-4. Publish, tag, and push `0.2.0` after release gates pass. **Not authorized.**
+4. Reconcile release tags and publish the current unreleased fixes only after
+   the release gates pass. **Not authorized.**
 
 ## Known Risks
 
-- Real v1 MDD evidence covers **14 artifacts and 77,863 entries**. That is a
-  much smaller denominator than the MDX evidence, and all 16 came from one
-  origin and a narrow candidate rule.
+- Real v1 MDD evidence covers **16 artifacts and 77,863 entries** (14 declare
+  version 1.2). That is a much smaller denominator than the MDX evidence, and
+  all 16 came from one origin and a narrow candidate rule.
 - Differential confirmation rests on two independent lineages. They agree with
   `mdictlib` on entry counts everywhere, but the Python lineage disagrees on
   payload content for six of ten sampled artifacts and that is **unresolved**.
@@ -679,9 +719,12 @@ pushed for `0.2.0`.
 - One artifact (`e50c5d5d…`) remains **corruption versus creator variant
   unresolved**. It is refused; if it is a creator variant, some real files use
   a keyword-metadata shape this grammar does not model.
-- The `GeneratedByEngineVersion` versus `RequiredEngineVersion` dispatch
-  question is unchanged and still unresolved. Version resolution keys on
-  `GeneratedByEngineVersion`, exactly as `0.1.0` did.
+- Version dispatch remains keyed on `GeneratedByEngineVersion`, exactly as
+  `0.1.0` did. `RequiredEngineVersion` is now parsed and checked separately:
+  malformed/future requirements and an impossible v1-generated/v2-required
+  relationship are refused without allowing the requirement to select a
+  grammar. This centralizes the former AALookup preflight policy; unusual
+  creator spellings outside the reviewed corpus remain a compatibility risk.
 - zlib in a v1 file is decoded by the shared envelope but has never been seen in
   an authorized artifact, so creator compatibility is untested.
 - The benchmark baseline predates this work and has not been re-measured.

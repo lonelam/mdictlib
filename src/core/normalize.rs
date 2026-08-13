@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::limits::try_reserve_string;
-use crate::types::Header;
+use crate::types::{ContainerKind, Header};
 
 /// The clean-room compatibility profile used when `StripKey` is enabled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,10 +13,11 @@ enum StripKeyProfile {
 pub(super) struct KeyNormalizer {
     case_sensitive: bool,
     strip_profile: Option<StripKeyProfile>,
+    resource_path: bool,
 }
 
 impl KeyNormalizer {
-    pub(super) const fn from_header(header: &Header) -> Self {
+    pub(super) const fn from_header(header: &Header, kind: ContainerKind) -> Self {
         Self {
             case_sensitive: header.key_case_sensitive,
             strip_profile: if header.strip_key {
@@ -24,6 +25,7 @@ impl KeyNormalizer {
             } else {
                 None
             },
+            resource_path: matches!(kind, ContainerKind::Mdd),
         }
     }
 
@@ -41,7 +43,18 @@ impl KeyNormalizer {
     /// bytes this appends; building millions of keys into one arena is the
     /// reason this exists rather than only [`Self::normalize`].
     pub(super) fn normalize_into(self, raw: &str, out: &mut String) {
-        for character in raw.chars().filter(|character| self.retains(*character)) {
+        let mut at_path_start = true;
+        for mut character in raw.chars() {
+            if self.resource_path && at_path_start && matches!(character, '/' | '\\') {
+                continue;
+            }
+            at_path_start = false;
+            if !self.retains(character) {
+                continue;
+            }
+            if self.resource_path && character == '/' {
+                character = '\\';
+            }
             if self.case_sensitive || character.is_ascii() {
                 // `char::to_lowercase` is a table lookup returning an iterator.
                 // Keys are overwhelmingly ASCII, and this runs over every key in
@@ -65,7 +78,18 @@ impl KeyNormalizer {
 
     pub(super) fn normalized_len(self, raw: &str) -> Result<usize> {
         let mut length = 0usize;
-        for character in raw.chars().filter(|character| self.retains(*character)) {
+        let mut at_path_start = true;
+        for mut character in raw.chars() {
+            if self.resource_path && at_path_start && matches!(character, '/' | '\\') {
+                continue;
+            }
+            at_path_start = false;
+            if !self.retains(character) {
+                continue;
+            }
+            if self.resource_path && character == '/' {
+                character = '\\';
+            }
             if self.case_sensitive || character.is_ascii() {
                 length = length
                     .checked_add(character.len_utf8())
@@ -90,6 +114,15 @@ mod tests {
         KeyNormalizer {
             case_sensitive,
             strip_profile: strip.then_some(StripKeyProfile::AsciiAlphanumeric),
+            resource_path: false,
+        }
+    }
+
+    fn resource_normalizer(case_sensitive: bool) -> KeyNormalizer {
+        KeyNormalizer {
+            case_sensitive,
+            strip_profile: None,
+            resource_path: true,
         }
     }
 
@@ -120,5 +153,17 @@ mod tests {
     #[test]
     fn case_folding_can_expand_unicode_characters() {
         assert_eq!(normalizer(false, false).normalize("İ").unwrap(), "i\u{307}");
+    }
+
+    #[test]
+    fn mdd_paths_ignore_leading_and_separator_style_differences() {
+        let normalizer = resource_normalizer(true);
+        for path in [
+            r"\assets\theme.css",
+            "/assets/theme.css",
+            "assets/theme.css",
+        ] {
+            assert_eq!(normalizer.normalize(path).unwrap(), r"assets\theme.css");
+        }
     }
 }

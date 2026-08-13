@@ -277,6 +277,21 @@ fn mdd_locator_preserves_duplicate_resource_identity_and_routes_lookup_by_ordina
 }
 
 #[test]
+fn mdd_lookup_accepts_relative_and_forward_slash_resource_paths() {
+    let fixture = FixtureBuilder::mdd([(r"\assets\theme.css", b"theme".to_vec())]).build();
+    let dictionary_file = fixture.write("mdd-compatible-resource-paths");
+    let dictionary = MddFile::open(dictionary_file.path()).unwrap();
+
+    let exact = dictionary.locate(r"\assets\theme.css").unwrap().unwrap();
+    assert_eq!(exact.basis(), MatchBasis::RawExact);
+    for query in ["assets/theme.css", "/assets/theme.css", r"assets\theme.css"] {
+        let matches = dictionary.locate(query).unwrap().unwrap();
+        assert_eq!(matches.basis(), MatchBasis::HeaderNormalized, "{query:?}");
+        assert_eq!(dictionary.lookup(query).unwrap().unwrap().bytes(), b"theme");
+    }
+}
+
+#[test]
 fn prefix_keys_walk_normalized_order_and_preserve_duplicates() {
     let fixture = FixtureBuilder::mdx([
         ("Apple", "one"),

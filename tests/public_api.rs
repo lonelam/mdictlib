@@ -70,5 +70,7 @@ fn value_api_contract() {
         .with_limits(Limits::new());
     let limits = options.limits();
     assert!(limits.working_memory_bytes() >= limits.locator_bytes());
+    let large_limits: Limits = Limits::large_dictionary();
+    assert!(large_limits.working_memory_bytes() >= limits.working_memory_bytes());
     assert!(!format!("{options:?}").contains("0123456789abcdef0123456789abcdef"));
 }
