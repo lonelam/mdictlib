@@ -1,23 +1,23 @@
 # mdictlib Status
 
-Last updated: 2026-08-13 (v0.2.2 current; unreleased fixes in progress)
+Last updated: 2026-08-13 (v0.2.3 current)
 
 ## Current Snapshot
 
-- `mdictlib` `0.2.2` is the current crate version and the current crates.io
+- `mdictlib` `0.2.3` is the current crate version and the current crates.io
   release. It supports MDict major versions 1 and 2 for MDX and MDD.
 - Version 1 support is implemented, tested against independent synthetic
   fixtures, fuzzed, and validated against 453 authorized real v1.2 MDX
   artifacts. **407 of 453 complete full validation**; every rejected artifact
   carries a structured retained classification.
-- The current compatibility and limit fixes are unreleased. Publishing,
+- The compatibility and limit fixes are included in `0.2.3`. Publishing,
   tagging, or pushing another release still requires explicit maintainer
   authorization.
 - Real v1 MDD is **validated**: 16 approved artifacts were acquired into the
   ignored cache and all 16 passed full validation, 14 of them declaring
   version 1.2.
 - The canonical repository is `https://github.com/lonelam/mdictlib`; the
-  repository's only release tag is `v0.1.0`, while `0.2.2` is published through
+  repository's only release tag is `v0.1.0`, while `0.2.3` is published through
   crates.io.
 - Rust is pinned to `1.97.1`; MSRV is `1.97`, edition 2024.
 - MDX and MDD, and both wire versions, use one defensive, file-backed parser
@@ -27,8 +27,8 @@ Last updated: 2026-08-13 (v0.2.2 current; unreleased fixes in progress)
   blocks are decoded lazily.
 - Unsafe code is forbidden.
 - The version 1 refactor preserved the `v0.1.0` API. Version `0.2.2` later
-  added compatible `MdxFile` scan/completion methods, and the unreleased work
-  adds the compatible `Limits::large_dictionary()` constructor.
+  added compatible `MdxFile` scan/completion methods, and `0.2.3` adds the
+  compatible `Limits::large_dictionary()` constructor plus compatibility fixes.
 - Public corpus metadata and acquisition tooling are tracked separately from
   ignored, locally authorized dictionary bytes under `.corpus/`.
 
@@ -286,7 +286,7 @@ finite-limit changes described in this status file.
 - **Public API at the version 1 cutover**: a source-level comparison of every
   public item reachable from `lib.rs` against the `v0.1.0` worktree was
   **identical** (126 items). The later `0.2.2` scan/completion methods and the
-  unreleased large-dictionary preset are deliberate compatible additions.
+  `0.2.3` large-dictionary preset are deliberate compatible additions.
 - **Version 2 corpus logical facts**: eight v2 artifacts audited with
   `examples/corpus_audit` under both the pre-refactor build (`1b3f6bb`) and the
   current build produced **byte-identical** entry counts, key digests, and
@@ -665,10 +665,10 @@ baselines the v1 program must not regress.
 ## Release Hygiene
 
 - `.github/workflows/ci.yml` exists.
-- `CHANGELOG.md` records `0.1.0`, `0.2.0`, `0.2.1`, and `0.2.2` plus the
-  current unreleased changes.
+- `CHANGELOG.md` records `0.1.0` through `0.2.3` plus future unreleased
+  changes.
 - `README.md`, crate rustdoc, examples, public API tests, and package metadata
-  describe the same current `0.2.2` dependency baseline and unreleased API.
+  describe the same current `0.2.3` dependency baseline and API.
 - `Cargo.toml` has `autobins = false` and a deliberate package include list.
 - Private corpus bytes, private manifests, temporary files, benchmark raw
   output, and `draft/` are not packaged.
@@ -681,9 +681,9 @@ baselines the v1 program must not regress.
 
 - Source: `https://github.com/lonelam/mdictlib`
 - Tag: `https://github.com/lonelam/mdictlib/tree/v0.1.0`
-- Package: `https://crates.io/crates/mdictlib/0.2.2`
+- Package: `https://crates.io/crates/mdictlib/0.2.3`
 
-`0.2.2` is published on crates.io and selected in crate metadata. The Git
+`0.2.3` is published on crates.io and selected in crate metadata. The Git
 repository currently exposes only the `v0.1.0` release tag. Creating missing or
 future tags, publishing another package, and pushing release state remain
 explicit maintainer actions.
@@ -698,8 +698,8 @@ explicit maintainer actions.
    `scripts/corpus/audit-v1.mjs` today, but its report is not committed.
 3. Re-run the checked-in benchmark harness on the recorded host to refresh the
    performance baseline; the 2026-08-10 numbers predate this work.
-4. Reconcile release tags and publish the current unreleased fixes only after
-   the release gates pass. **Not authorized.**
+4. Reconcile the missing `v0.2.3` Git tag when a maintainer authorizes that
+   release-hygiene action. **Not authorized.**
 
 ## Known Risks
 

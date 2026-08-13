@@ -79,14 +79,14 @@ prefix/fuzzy search, mmap, and persistent sidecars are out of scope.
 
 ```toml
 [dependencies]
-mdictlib = "0.2.2"
+mdictlib = "0.2.3"
 ```
 
 Enable LZO when required by a dictionary:
 
 ```toml
 [dependencies]
-mdictlib = { version = "0.2.2", features = ["lzo"] }
+mdictlib = { version = "0.2.3", features = ["lzo"] }
 ```
 
 ## MDX
@@ -222,8 +222,7 @@ preallocation: it is sized from a measured 4,362,467-entry, 190 MB MDX that
 retained about 121 MB after lookup indexing. Ten comparable dictionaries need
 about 1.21 GB of retained memory before application overhead, so an application
 opening many files should add its own aggregate budget as AALookup does. The
-preset is an additive API in the current working tree and will become available
-to registry consumers only with an authorized follow-up release.
+preset is an additive API available to registry consumers in `0.2.3`.
 
 `MemoryUsage` values are conservative parser budget estimates, not allocator or
 operating-system RSS. Payloads already returned to the caller are excluded.

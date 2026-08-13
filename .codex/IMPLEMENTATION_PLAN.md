@@ -1,6 +1,6 @@
 # mdictlib Implementation Roadmap
 
-Last updated: 2026-08-13 (v0.2.2 current; unreleased fixes in progress)
+Last updated: 2026-08-13 (v0.2.3 current)
 
 ## 1. Release State And Active Program
 
@@ -9,7 +9,7 @@ Last updated: 2026-08-13 (v0.2.2 current; unreleased fixes in progress)
 
 The **MDict version 1 compatibility program is implemented**. Milestones 1
 through 6 are complete, and its `0.2.0` release decision is historical. Crate
-metadata and crates.io are now at **`0.2.2`**; the repository still exposes
+metadata and crates.io are now at **`0.2.3`**; the repository still exposes
 only the `v0.1.0` tag. Any future publish, tag, or push remains an explicit
 maintainer action.
 
@@ -745,7 +745,7 @@ authorization.
 | 4. Implement `format::v1` | complete | Only evidence-backed grammar. Encryption and ISO8859-1 refused precisely. |
 | 5. Safety and fuzzing | complete | Ten fuzz targets under AddressSanitizer, including `v1_whole_file`, `v1_truncation`, and `version_dispatch`; mutation and truncation sweeps over whole v1 MDX and MDD files. |
 | 6. Corpus and differential validation | complete | 407 of 453 real artifacts fully validated; 46 rejected with retained classifications; two independent observations agree on all 453. Differential against one independent lineage with zero unexplained disagreements. |
-| 7. MDD validation, documentation, release decision | MDD and docs complete; the historical `0.2.0` decision was followed by compatible `0.2.1`/`0.2.2` releases | README, STATUS, this roadmap, `CHANGELOG.md`, and crate rustdoc are synchronized; current unreleased fixes remain subject to maintainer release authorization. |
+| 7. MDD validation, documentation, release decision | MDD and docs complete; the historical `0.2.0` decision was followed by compatible `0.2.1`/`0.2.2`/`0.2.3` releases | README, STATUS, this roadmap, `CHANGELOG.md`, and crate rustdoc are synchronized; future releases remain subject to maintainer authorization. |
 
 ### 8.6 What was learned that changed the plan
 
@@ -801,7 +801,7 @@ All are enforced by `tests/architecture.rs` and **pass**.
 | every accepted v1 artifact completes ordinal, raw-lookup, duplicate, and payload validation | pass — 407 of 453 |
 | every rejected artifact has a structured retained classification | pass — 46 of 46 |
 | malformed input cannot panic or bypass limits | pass — mutation and truncation sweeps plus ten AddressSanitizer fuzz targets |
-| public API diff at the version 1 cutover is empty | pass — 126 items identical; later `0.2.2` scan/completion methods and the unreleased large-limit preset are compatible additions |
+| public API diff at the version 1 cutover is empty | pass — 126 items identical; later `0.2.2` scan/completion methods and the `0.2.3` large-limit preset are compatible additions |
 | benchmark baseline within its 2x diagnostic threshold | **not re-measured**; the checked-in baseline predates this work |
 | real v1 MDD validation | pass — 16 of 16 acquired artifacts fully validated |
 

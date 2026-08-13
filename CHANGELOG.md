@@ -4,6 +4,10 @@ All notable changes are recorded here.
 
 ## [Unreleased]
 
+No changes yet.
+
+## [0.2.3] - 2026-08-13
+
 ### Added
 
 - `Limits::large_dictionary()`, a finite, opt-in high-headroom policy for
@@ -228,7 +232,8 @@ digests, and payload digests are unchanged.
   to the library, examples, tests, documentation, and license material.
 - Released version `0.1.0` as the first public release.
 
-[Unreleased]: https://github.com/lonelam/mdictlib/compare/bc72444...HEAD
+[Unreleased]: https://github.com/lonelam/mdictlib/compare/31a3e9f...HEAD
+[0.2.3]: https://github.com/lonelam/mdictlib/compare/bc72444...31a3e9f
 [0.2.2]: https://github.com/lonelam/mdictlib/compare/fe22dfd...bc72444
 [0.2.1]: https://github.com/lonelam/mdictlib/compare/ad4afaa...fe22dfd
 [0.2.0]: https://github.com/lonelam/mdictlib/compare/v0.1.0...ad4afaa
