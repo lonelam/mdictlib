@@ -420,6 +420,21 @@ Persistent-index construction follow-up on Windows on 2026-09-05:
   counters include required MDX metadata reads; the isolated sidecar open test
   remains the exact size-independent result at two reads and 248 bytes.
 
+Checksum hot-path follow-up on 2026-09-05:
+
+- Common Adler-32 now reduces its accumulators once per 5,552-byte block,
+  matching the existing persistent-index streaming implementation. A boundary
+  regression compares the optimized result with the bytewise reference.
+- Checksums remain required integrity checks: decoded key/record blocks and
+  persistent-index chunks are checked on first use, while repeated access to a
+  cached block or chunk does not recompute it. The persistent index intentionally
+  retains one verified chunk per section, so random cross-chunk access can still
+  incur another read and checksum; this is the bounded-memory tradeoff.
+- A standalone 512 MiB release microbenchmark measured the old bytewise Adler
+  loop at about 854 ms versus about 95 ms after block reduction (same result,
+  roughly 9x faster). This is a checksum microbenchmark, not a full-corpus
+  performance claim.
+
 Paged-locator follow-up validation:
 
 - `cargo test --locked --all-targets --all-features`, strict clippy, strict

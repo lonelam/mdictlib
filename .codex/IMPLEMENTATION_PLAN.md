@@ -504,7 +504,11 @@ checksum directory or any data section. The expected checksum is loaded through
 one lazy 4 KiB page; every row is interpreted from the exact verified section
 bytes and validates local bounds/UTF-8. Runtime sidecar reads are serialized per
 index. Header, checksum-page, chunk, and returned-byte memory is charged to the
-originating dictionary budget.
+originating dictionary budget. Adler-32 reduces its accumulators once per
+5,552-byte block rather than once per byte; this preserves the format checksum
+while avoiding a modulo operation in the key/record decode hot path. The
+bounded section cache still permits a random query to re-read and re-check a
+chunk after another chunk replaces it.
 
 Construction streams physical text/bounds/digests through bounded scratch
 write buffers and appends normalized bytes to one arena with offset records.
