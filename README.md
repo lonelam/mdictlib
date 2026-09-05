@@ -19,6 +19,9 @@ dictionaries and `.mdd` resource dictionaries.
   reads, decompression, allocation, locator construction, and materialization;
   `Limits::new()` is finite and `Limits::large_dictionary()` is an explicit
   high-headroom preset for modern hosts.
+- MDX callers can build and reopen a source-bound persistent key index without
+  first retaining the complete process-lifetime locator. Construction uses a
+  bounded external merge; runtime access verifies file chunks lazily.
 - Unsafe code is forbidden.
 
 ## Supported Scope
@@ -73,7 +76,7 @@ Independent full-file tests cover every listed encoding and compression path,
 both encryption modes, multi-block boundaries, duplicate keys, corruption, and
 hostile declarations, for both wire versions. Future-major layouts, writing,
 HTML/style processing, resource extraction policy, multi-volume discovery,
-prefix/fuzzy search, mmap, and persistent sidecars are out of scope.
+fuzzy search, mmap, and persistent MDD sidecars are out of scope.
 
 ## Using mdictlib
 
@@ -88,6 +91,11 @@ Enable LZO when required by a dictionary:
 [dependencies]
 mdictlib = { version = "0.2.3", features = ["lzo"] }
 ```
+
+`0.2.3` is the published crates.io release. `0.2.4` is the current unreleased
+source/package candidate; a sibling integration validating its persistent-index
+API should use an explicit local path dependency such as
+`mdictlib = { path = "../mdictlib" }` until publication is authorized.
 
 ## MDX
 
@@ -107,6 +115,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Large homograph groups can be pulled without allocating every ordinal.
+    if let Some(page) = dictionary.locate_page("apple", 100, 20)? {
+        println!("{} total matches", page.total());
+        for ordinal in page.iter() {
+            println!("page ordinal {}", ordinal.get());
+        }
+    }
+
     if let Some(entry) = dictionary.entry_at(KeyOrdinal::new(42))? {
         println!("physical entry 42 is {}", entry.key());
     }
@@ -123,6 +139,119 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 `locate()` searches every raw key first. Only a global raw miss enables the
 header-controlled normalized index. `KeyMatches` preserves every matching
 ordinal in physical order and reports `RawExact` or `HeaderNormalized`.
+`locate_page()` preserves the same global basis, total, duplicate identity, and
+order while retaining only the requested ordinal window. `MddFile` exposes the
+same paged locator for resource keys.
+
+## Persistent MDX Key Indexes
+
+Applications managing many large dictionaries can keep normalized key data in
+a caller-owned sidecar instead of rebuilding and retaining one full locator per
+open process. mdictlib owns the binary format, normalization, matching
+semantics, bounded construction, and lazy integrity checks. The application
+owns the cache namespace, scratch-space preflight, atomic publication, leases,
+quotas, and garbage collection.
+
+```rust,no_run
+use mdictlib::{KeyIndexOptions, MdxFile, KEY_INDEX_REVISION};
+use std::fs;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let dictionary = MdxFile::open("dictionary.mdx")?;
+    let cache_dir = format!("cache/{KEY_INDEX_REVISION}");
+    fs::create_dir_all(&cache_dir)?;
+    let options = KeyIndexOptions::new()
+        .with_build_memory_bytes(32 * 1024 * 1024)
+        .with_chunk_bytes(64 * 1024)
+        .with_scratch_directory(&cache_dir);
+
+    // Put this below a namespace derived from the stable source location. The
+    // partial and final path must share a filesystem for an atomic rename.
+    let partial = format!(
+        "{cache_dir}/dictionary-42.{}.pending.aaidx",
+        std::process::id(),
+    );
+    let final_path = format!("{cache_dir}/dictionary-42.aaidx");
+    let build = dictionary.build_key_index_to_path(&partial, &options, || false)?;
+    fs::rename(&partial, &final_path)?;
+    let index = dictionary.open_key_index(&final_path, &build.source_identity(), &options)?;
+
+    if let Some(matches) = dictionary.locate_with_key_index(&index, "apple")? {
+        println!("{:?}: {} rows", matches.basis(), matches.len());
+    }
+    if let Some(page) = dictionary.locate_page_with_key_index(&index, "apple", 0, 20)? {
+        println!("first {} of {} rows", page.len(), page.total());
+    }
+    Ok(())
+}
+```
+
+`KEY_INDEX_REVISION` is a filesystem-safe aggregate of the format,
+parser/layout, and normalization revisions. Cache entries must be namespaced by
+the source's stable location plus this revision. `KeyIndexSourceIdentity`
+contains the length, filesystem modification time, and physical key count for
+that location; it is an inexpensive freshness stamp, not a content hash and not
+a cross-path deduplication key. Moving or copying a dictionary therefore gives
+it a different host namespace even when its length and timestamps happen to
+match.
+
+`build_key_index_to_path()` is deliberately a low-level, non-atomic create-new
+operation. It flushes and syncs the new file, but the caller must build at a
+unique temporary path and publish with a same-filesystem atomic rename. Discard
+the partial path after any error. `build_key_index()` accepts `Write + Seek` and
+never reads the final destination; `KeyIndexBuild::bytes_written()` reports its
+length. The source's metadata stamp is checked before and after construction.
+
+The index stores normalized text and bounds in physical order, a second ordinal
+array sorted by normalized text then physical ordinal, and one raw-text digest
+per physical row. Digests only filter candidates: source key blocks prove every
+positive raw match. Raw-exact precedence, normalized fallback, duplicates,
+prefix order, and physical scan order therefore match `locate()`,
+`prefix_keys()`, and `scan_normalized_keys()`. `locate_page_with_key_index()`
+retains only `min(limit, total - offset)` ordinals and charges that bounded
+window to aggregate memory; the complete-set API still materializes and caps
+the equal range while its `KeyMatches` is alive.
+
+Every independent page call scans the complete normalized equal range to prove
+the global raw-exact basis and exact total. This work is necessary: a raw match
+outside the requested window must suppress normalized fallback inside it.
+Sequential hosts should therefore request and cache a bounded ordinal window
+rather than issue a one-row parser call for every rendered row. Persistent
+physical scans source-verify each visited normalized row and raw digest before
+calling the visitor, so an unchanged-layout source-key mutation rejects the
+index instead of returning stale index text.
+
+Normal open validates the expected metadata identity, revisions, fixed-header
+checksum, file length, and checked section geometry. Format revision 2 performs
+two fixed reads totalling 248 bytes; it does not load the checksum directory or
+any data section. On first use of a section chunk, the corresponding bounded
+checksum page and exact chunk bytes are read. The verified bytes stay in the
+bounded per-section cache and are the bytes interpreted. A positive lookup or
+prefix result is additionally checked against the corresponding current MDX
+source row. Invalid sidecars return `Error::KeyIndexRejected` and never make the
+MDX itself unreadable.
+
+Header buffers, one 4 KiB checksum page, section chunk caches, and transient
+read results are charged to the originating dictionary's aggregate memory
+budget and reflected in `MemoryUsage` current/peak. Build-only sort arenas,
+scratch files, and artifact disk bytes are not steady-state parser heap.
+Construction decodes the source once, appends normalized bytes to a shared
+arena, writes one-batch ordering directly, and otherwise uses bounded buffered
+external-merge runs. No source row is individually allocated or sought during
+multi-run sorting.
+
+Section and header checksums are unkeyed corruption detection, not a security
+proof against an attacker who can rewrite the sidecar and its checksums. The
+metadata stamp likewise does not defend against timestamp spoofing. Persistent
+indexes are local, rebuildable caches; delete and rebuild one after any
+rejection.
+
+The sidecar contains plaintext normalized headwords. Every readable MDX source,
+including version 2 keyword-index encryption, uses the same ordinary index
+path; there is no encrypted-source policy gate. Callers own storage and
+lifecycle policy for this derived artifact. A passcode-protected source must
+still be opened successfully before it can be indexed. Persistent MDD indexing
+is intentionally deferred.
 
 ## MDD
 
@@ -222,7 +351,7 @@ preallocation: it is sized from a measured 4,362,467-entry, 190 MB MDX that
 retained about 121 MB after lookup indexing. Ten comparable dictionaries need
 about 1.21 GB of retained memory before application overhead, so an application
 opening many files should add its own aggregate budget as AALookup does. The
-preset is an additive API available to registry consumers in `0.2.3`.
+preset is an additive API available to registry consumers since `0.2.3`.
 
 `MemoryUsage` values are conservative parser budget estimates, not allocator or
 operating-system RSS. Payloads already returned to the caller are excluded.

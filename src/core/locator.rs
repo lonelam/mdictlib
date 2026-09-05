@@ -50,23 +50,53 @@ pub(crate) enum LocatorBasis {
 
 #[derive(Debug, Clone)]
 pub(crate) struct LocatedKeys {
-    locator: Arc<KeyLocator>,
     basis: LocatorBasis,
-    /// The normalized equal range, used whole for a header-normalized match.
-    range: Range<usize>,
-    /// Physical ordinals proven raw-exact, when the basis is [`LocatorBasis::RawExact`].
-    exact: Option<Arc<[u32]>>,
+    ordinals: LocatedOrdinals,
+}
+
+#[derive(Debug)]
+pub(crate) struct LocatedKeyPage {
+    basis: LocatorBasis,
+    total: usize,
+    ordinals: Box<[u32]>,
+    _reservation: Option<MemoryReservation>,
+}
+
+#[derive(Debug, Clone)]
+enum LocatedOrdinals {
+    Locator {
+        locator: Arc<KeyLocator>,
+        range: Range<usize>,
+    },
+    Owned {
+        ordinals: Arc<[u32]>,
+        _reservation: Option<Arc<MemoryReservation>>,
+    },
 }
 
 impl LocatedKeys {
+    pub(super) fn from_owned_with_reservation(
+        basis: LocatorBasis,
+        ordinals: Vec<u32>,
+        reservation: Option<MemoryReservation>,
+    ) -> Option<Self> {
+        (!ordinals.is_empty()).then(|| Self {
+            basis,
+            ordinals: LocatedOrdinals::Owned {
+                ordinals: Arc::from(ordinals.into_boxed_slice()),
+                _reservation: reservation.map(Arc::new),
+            },
+        })
+    }
+
     pub(crate) const fn basis(&self) -> LocatorBasis {
         self.basis
     }
 
     pub(crate) fn len(&self) -> usize {
-        match &self.exact {
-            Some(exact) => exact.len(),
-            None => self.range.len(),
+        match &self.ordinals {
+            LocatedOrdinals::Locator { range, .. } => range.len(),
+            LocatedOrdinals::Owned { ordinals, .. } => ordinals.len(),
         }
     }
 
@@ -75,17 +105,57 @@ impl LocatedKeys {
     }
 
     pub(crate) fn ordinal_at(&self, index: usize) -> Option<KeyOrdinal> {
-        let ordinal = match &self.exact {
-            Some(exact) => *exact.get(index)?,
-            None => {
-                let position = self.range.start.checked_add(index)?;
-                if position >= self.range.end {
+        let ordinal = match &self.ordinals {
+            LocatedOrdinals::Locator { locator, range } => {
+                let position = range.start.checked_add(index)?;
+                if position >= range.end {
                     return None;
                 }
-                *self.locator.order.get(position)?
+                *locator.order.get(position)?
             }
+            LocatedOrdinals::Owned { ordinals, .. } => *ordinals.get(index)?,
         };
         Some(KeyOrdinal::new(u64::from(ordinal)))
+    }
+}
+
+impl LocatedKeyPage {
+    pub(crate) fn from_owned_with_reservation(
+        basis: LocatorBasis,
+        total: usize,
+        ordinals: Vec<u32>,
+        reservation: Option<MemoryReservation>,
+    ) -> Self {
+        Self {
+            basis,
+            total,
+            ordinals: ordinals.into_boxed_slice(),
+            _reservation: reservation,
+        }
+    }
+
+    pub(crate) const fn basis(&self) -> LocatorBasis {
+        self.basis
+    }
+
+    pub(crate) const fn total(&self) -> usize {
+        self.total
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.ordinals.len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.ordinals.is_empty()
+    }
+
+    pub(crate) fn ordinal_at(&self, index: usize) -> Option<KeyOrdinal> {
+        self.ordinals
+            .get(index)
+            .copied()
+            .map(u64::from)
+            .map(KeyOrdinal::new)
     }
 }
 
@@ -113,19 +183,119 @@ impl MdictFile {
         // equality, so nothing outside can be raw-exact.
         if let Some(exact) = self.raw_exact_within(&locator, &range, query)? {
             return Ok(Some(LocatedKeys {
-                locator,
                 basis: LocatorBasis::RawExact,
-                range,
-                exact: Some(exact),
+                ordinals: LocatedOrdinals::Owned {
+                    ordinals: exact,
+                    _reservation: None,
+                },
             }));
         }
 
         Ok(Some(LocatedKeys {
-            locator,
             basis: LocatorBasis::HeaderNormalized,
-            range,
-            exact: None,
+            ordinals: LocatedOrdinals::Locator { locator, range },
         }))
+    }
+
+    /// Locates the requested physical-ordinal window without materializing the
+    /// complete duplicate set. Raw-exact precedence is still decided across
+    /// the complete normalized equal range before the page basis is returned.
+    pub(crate) fn locate_key_page(
+        &self,
+        query: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Option<LocatedKeyPage>> {
+        let locator = self.key_locator()?;
+
+        let normalized_len = self.normalizer.normalized_len(query)?;
+        ensure_usize_limit(
+            "normalized_query_bytes",
+            normalized_len,
+            self.limits.locator_bytes,
+        )?;
+        let _query_memory = self
+            .memory
+            .reserve(normalized_len, "normalized paged lookup query")?;
+        let normalized = self.normalizer.normalize(query)?;
+
+        let Some(range) = locator.equal_range(&normalized) else {
+            return Ok(None);
+        };
+        let page_capacity = limit.min(range.len().saturating_sub(offset));
+        let page_bytes = page_capacity
+            .checked_mul(size_of::<u32>())
+            .ok_or(Error::InvalidFormat("key match page size overflow"))?;
+        ensure_usize_limit(
+            "key_match_page_bytes",
+            page_bytes,
+            self.limits.locator_bytes,
+        )?;
+        let page_memory = self.memory.reserve(page_bytes, "key match page")?;
+        let mut ordinals = Vec::new();
+        try_reserve_vec(&mut ordinals, page_capacity, "key match page")?;
+
+        let digest = raw_digest(query);
+        let mut exact_count = 0usize;
+        for position in range.clone() {
+            let row = *locator.order.get(position).ok_or(Error::InvalidFormat(
+                "locator range escaped its order index",
+            ))?;
+            let row_index = usize::try_from(row)
+                .map_err(|_| Error::InvalidFormat("locator row index exceeds usize"))?;
+            if *locator
+                .raw_digest
+                .get(row_index)
+                .ok_or(Error::InvalidFormat("locator row has no raw digest"))?
+                != digest
+            {
+                continue;
+            }
+            let ordinal = KeyOrdinal::new(u64::from(row));
+            let hit = self
+                .key_entry_at_ordinal(ordinal)?
+                .ok_or(Error::InvalidFormat("locator row has no key block entry"))?;
+            let entry = hit
+                .entries
+                .get(hit.entry_index)
+                .ok_or(Error::InvalidFormat("locator row escaped its key block"))?;
+            if entry.key == query {
+                let match_index = exact_count;
+                exact_count = exact_count
+                    .checked_add(1)
+                    .ok_or(Error::InvalidFormat("raw-exact match count overflow"))?;
+                if match_index >= offset && ordinals.len() < limit {
+                    ordinals.push(row);
+                }
+            }
+        }
+        if exact_count != 0 {
+            return Ok(Some(LocatedKeyPage::from_owned_with_reservation(
+                LocatorBasis::RawExact,
+                exact_count,
+                ordinals,
+                Some(page_memory),
+            )));
+        }
+
+        ordinals.clear();
+        let total = range.len();
+        let page_start = range.start.saturating_add(offset.min(total));
+        let page_end = page_start.saturating_add(limit).min(range.end);
+        for position in page_start..page_end {
+            ordinals.push(
+                *locator
+                    .order
+                    .get(position)
+                    .ok_or(Error::InvalidFormat("locator page escaped its order index"))?,
+            );
+        }
+        Ok(Some(LocatedKeyPage::from_owned_with_reservation(
+            LocatorBasis::HeaderNormalized,
+            total,
+            ordinals,
+            Some(page_memory),
+        )))
     }
 
     /// Physical ordinals inside `range` whose raw key equals `query`, in
@@ -417,7 +587,7 @@ fn compare_rows(text: &str, bounds: &[u32], left: u32, right: u32) -> Ordering {
 
 /// A cheap order-sensitive digest, used only to skip rows that cannot be
 /// raw-exact. Collisions cost one key-block probe, never a wrong answer.
-fn raw_digest(raw: &str) -> u32 {
+pub(super) fn raw_digest(raw: &str) -> u32 {
     const OFFSET: u32 = 2_166_136_261;
     const PRIME: u32 = 16_777_619;
     let mut hash = OFFSET;

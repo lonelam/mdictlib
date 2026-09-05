@@ -2,13 +2,14 @@ mod iter;
 mod keys;
 mod locator;
 mod normalize;
+pub(crate) mod persistent;
 mod records;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
 pub(crate) use iter::{KeyIter, RecordIter};
-pub(crate) use locator::{LocatedKeys, LocatorBasis};
+pub(crate) use locator::{LocatedKeyPage, LocatedKeys, LocatorBasis};
 pub(crate) use records::RecordDescriptor;
 
 use crate::error::{Error, Result};
@@ -64,7 +65,11 @@ enum CachedFailureKind {
 impl CachedFailure {
     pub(super) fn capture(error: &Error, memory: &Arc<MemoryBudget>) -> Option<Self> {
         let (kind, reservation) = match error {
-            Error::Io(_) | Error::AllocationFailed { .. } => return None,
+            Error::Io(_)
+            | Error::AllocationFailed { .. }
+            | Error::KeyIndexRejected(_)
+            | Error::Cancelled { .. }
+            | Error::SourceChanged { .. } => return None,
             Error::LimitExceeded {
                 limit: "working_memory_bytes",
                 ..

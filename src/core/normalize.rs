@@ -70,6 +70,37 @@ impl KeyNormalizer {
         }
     }
 
+    /// Appends the normalized UTF-8 bytes directly to a shared byte arena.
+    pub(super) fn normalize_bytes_into(self, raw: &str, out: &mut Vec<u8>) {
+        let mut at_path_start = true;
+        for mut character in raw.chars() {
+            if self.resource_path && at_path_start && matches!(character, '/' | '\\') {
+                continue;
+            }
+            at_path_start = false;
+            if !self.retains(character) {
+                continue;
+            }
+            if self.resource_path && character == '/' {
+                character = '\\';
+            }
+            if self.case_sensitive || character.is_ascii() {
+                let normalized = if self.case_sensitive {
+                    character
+                } else {
+                    character.to_ascii_lowercase()
+                };
+                let mut encoded = [0u8; 4];
+                out.extend_from_slice(normalized.encode_utf8(&mut encoded).as_bytes());
+            } else {
+                for normalized in character.to_lowercase() {
+                    let mut encoded = [0u8; 4];
+                    out.extend_from_slice(normalized.encode_utf8(&mut encoded).as_bytes());
+                }
+            }
+        }
+    }
+
     const fn retains(self, character: char) -> bool {
         !matches!(self.strip_profile, Some(StripKeyProfile::AsciiAlphanumeric))
             || !character.is_ascii()

@@ -1,18 +1,23 @@
 # mdictlib Status
 
-Last updated: 2026-08-13 (v0.2.3 current)
+Last updated: 2026-09-04 (v0.2.4 package candidate; v0.2.3 published)
 
 ## Current Snapshot
 
-- `mdictlib` `0.2.3` is the current crate version and the current crates.io
-  release. It supports MDict major versions 1 and 2 for MDX and MDD.
+- `mdictlib` `0.2.4` is the current source/package candidate; `0.2.3` remains
+  the current crates.io release. The crate supports MDict major versions 1 and
+  2 for MDX and MDD.
 - Version 1 support is implemented, tested against independent synthetic
   fixtures, fuzzed, and validated against 453 authorized real v1.2 MDX
   artifacts. **407 of 453 complete full validation**; every rejected artifact
   carries a structured retained classification.
-- The compatibility and limit fixes are included in `0.2.3`. Publishing,
-  tagging, or pushing another release still requires explicit maintainer
-  authorization.
+- The compatible persistent MDX key-index facility is implemented in the
+  `0.2.4` candidate. Publishing, tagging, or pushing it still requires explicit
+  maintainer authorization.
+- AALookup integration has started against this adjacent `0.2.4` checkout: its
+  normal build now compiles the persistent-index API by default, without a
+  Cargo feature or build-script environment `cfg` gate. This local path is an
+  integration bridge, not a published dependency or release cutover.
 - Real v1 MDD is **validated**: 16 approved artifacts were acquired into the
   ignored cache and all 16 passed full validation, 14 of them declaring
   version 1.2.
@@ -27,8 +32,10 @@ Last updated: 2026-08-13 (v0.2.3 current)
   blocks are decoded lazily.
 - Unsafe code is forbidden.
 - The version 1 refactor preserved the `v0.1.0` API. Version `0.2.2` later
-  added compatible `MdxFile` scan/completion methods, and `0.2.3` adds the
-  compatible `Limits::large_dictionary()` constructor plus compatibility fixes.
+  added compatible `MdxFile` scan/completion methods, `0.2.3` added the
+  compatible `Limits::large_dictionary()` constructor plus compatibility
+  fixes, and the `0.2.4` candidate adds persistent MDX indexing without
+  changing existing methods.
 - Public corpus metadata and acquisition tooling are tracked separately from
   ignored, locally authorized dictionary bytes under `.corpus/`.
 
@@ -46,7 +53,9 @@ Public root facade:
 
 - `MdxFile`, `MdxEntry`
 - `MddFile`, `MddResource`, `MddResourceSpan`
-- `KeyEntry`, `KeyOrdinal`, `KeyMatches`, `MatchBasis`
+- `KeyEntry`, `KeyOrdinal`, `KeyMatches`, `KeyMatchPage`, `MatchBasis`
+- `KeyIndex`, `KeyIndexOptions`, `KeyIndexSourceIdentity`, `KeyIndexBuild`,
+  `KeyIndexRejection`, and stable key-index revision constants
 - `Header`, `OpenOptions`, `Passcode`, `Limits`, `MemoryUsage`
 - `Error`, `Result`
 
@@ -54,7 +63,13 @@ Private implementation:
 
 - `src/core/`: shared open state, caches, memory accounting, lazy key blocks,
   ordinal access, record descriptors and spans, fused iteration, header-driven
-  normalization, and the lazy duplicate-aware locator. **Version-blind.**
+  normalization, the lazy duplicate-aware locator, and the bounded external
+  persistent-index builder/file-backed accessor. The persistent-index code is
+  organized under `src/core/persistent/` by cache, query, build, sort, format,
+  and tests responsibilities. **Version-blind.**
+- `src/index.rs`: public persistent-index policy, source identity, handle, revision, and
+  structured-rejection values; storage/publication policy remains outside the
+  crate.
 - `src/format/mod.rs`: the bounded common header, the single `WireVersion`
   resolution, and the crate's only version `match`.
 - `src/format/common/`: `descriptors.rs` (the `ValidatedLayout` boundary),
@@ -110,6 +125,8 @@ version enum in the core, no per-entry branch, and no trait object.
 - `key_at()` and `keys_at()` use the same physical identity; batched access
   preserves caller order, repeats, and out-of-range `None` values.
 - `locate()` builds one lazy, budgeted global locator shared by MDX and MDD.
+- `locate_page()` on MDX and MDD reports the same global basis, exact total,
+  duplicate identity, and order while retaining only the requested ordinals.
 - Global raw-exact matches always win; header-normalized lookup occurs only
   after a complete raw miss.
 - `KeyMatches` reports `MatchBasis` and every duplicate ordinal in ascending
@@ -146,6 +163,62 @@ version enum in the core, no per-entry branch, and no trait object.
 - Encoded and worst-case decoded text sizes are preflighted and jointly charged
   before record materialization.
 
+### Persistent MDX key indexes
+
+- `KEY_INDEX_REVISION` aggregates independently exposed format,
+  parser/layout, and normalization revisions (`f2-p1-n1` in this candidate).
+- `key_index_source_identity()` reads source length and filesystem modification
+  time from the already-open `FileSource` without scanning contents, and binds
+  those values plus the parsed physical key count. Hosts namespace each local
+  cache by stable source location plus `KEY_INDEX_REVISION`; the metadata value
+  is only that location's freshness stamp, never a cross-path deduplication key.
+- `build_key_index()` and `build_key_index_to_path()` use bounded sort batches,
+  buffered scratch-backed external merge runs, and cancellation checkpoints.
+  Normalized bytes append to one reusable arena with offset records instead of
+  one allocation per key. A one-batch sort writes its order directly; larger
+  merges use bounded per-run read buffers, reuse active key allocations, and
+  write the final merge directly to the order section. They never initialize
+  the existing `OnceLock<KeyLocator>`.
+- Final destinations require `Write + Seek`, are streamed once, and are never
+  read back. The create-new path builder flushes and syncs but deliberately does
+  not publish atomically: callers build at a unique partial path and perform a
+  same-filesystem rename. Job leases, quotas, and garbage collection remain
+  host responsibilities.
+- The format contains magic/endian/revision/header/total-length fields, the
+  metadata source identity, checked 64-bit aligned section descriptors, physical
+  normalized text and `u64` bounds, physical raw digests, and physical ordinals
+  sorted by normalized text then ordinal.
+- Open reads a fixed 24-byte prefix and 224-byte header, validates its checksum
+  and all section geometry, and does not read the checksum directory or data
+  sections. Expected checksums are fetched through one lazy bounded page; exact
+  verified section bytes, rather than a verification flag followed by a second
+  read, are interpreted. Those caches and transient results remain charged to
+  the originating dictionary memory budget.
+- Indexed lookup preserves global raw-exact precedence, normalized fallback,
+  all duplicate physical ordinals, normalized prefix order, and physical scan
+  order. A raw digest only filters candidates; a source key-block read proves
+  every positive raw match. Equal-range ordinal materialization is capped by
+  `Limits::locator_bytes`, uses one vector for raw filtering and fallback, and
+  remains charged to aggregate working memory while `KeyMatches` is alive.
+- `locate_page_with_key_index()` charges and retains only the requested
+  ordinal window. Each independent call still inspects the complete normalized
+  equal range because an out-of-window raw match must suppress normalized
+  fallback; sequential hosts should cache bounded windows rather than request
+  one row at a time.
+- Persistent normalized scans source-verify every visited row's normalized text
+  and raw digest before invoking the visitor, so a same-layout source-key
+  mutation cannot be returned as stale index text.
+- Stale, corrupt, incompatible, malformed, truncated, and source-mismatched
+  artifacts return `Error::KeyIndexRejected`; the underlying MDX remains usable.
+- Length/mtime identity and unkeyed Adler-32 checksums detect ordinary cache
+  staleness or corruption; neither authenticates adversarial replacement.
+  Sidecars are disposable local cache data and are rebuilt after rejection.
+- Every readable encrypted MDX uses the ordinary persistent-index path. The
+  derivative contains plaintext normalized headwords, but mdictlib applies no
+  encrypted-source policy gate; storage policy belongs to the host.
+  Passcode-protected sources must still open successfully before indexing.
+  Persistent MDD indexing remains deferred.
+
 ### MDD
 
 - `resource_at()` and `lookup()` return materialized ordinal-bearing resources.
@@ -172,6 +245,13 @@ version enum in the core, no per-entry branch, and no trait object.
   locator/cache construction is serialized.
 - `Passcode::new()` validates borrowed inputs before cloning, caps the user ID
   at 4096 UTF-8 bytes, uses fallible cloning, and redacts debug output.
+- `KeyIndexOptions` separately caps artifact/metadata/chunk sizes and external
+  sort memory and selects scratch placement. Build-only sort buffers, scratch
+  files, and artifact disk bytes are not steady-state parser heap and are not
+  reported through `MemoryUsage`. Once a `KeyIndex` is open, however, its exact
+  retained checksum directory and verified chunk cache, plus transient verified
+  reads, are charged to the dictionary budget and reflected in `MemoryUsage`
+  current/peak.
 
 ## Supported And Fixture-Proven Paths
 
@@ -281,12 +361,84 @@ The historical v1 gate counts above remain retained as the independently dated
 2026-08-11 evidence snapshot; the current pass adds the compatibility and
 finite-limit changes described in this status file.
 
+Persistent-index candidate validation on Windows on 2026-09-04:
+
+- `cargo fmt --all -- --check`: passed
+- `cargo test --locked --all-targets` and
+  `cargo test --locked --all-targets --all-features`: passed; only the same
+  three private-corpus tests were ignored
+- `cargo clippy --locked --all-targets --all-features -- -D warnings`: passed
+- doctests and rustdoc with warnings, missing docs, and broken links denied:
+  passed
+- `cargo package --locked --offline --allow-dirty`: packaged and verified the
+  `0.2.4` candidate
+- `cargo fetch --locked --manifest-path fuzz/Cargo.toml`: passed after updating
+  the fuzz lock for the package version and new dependencies; cargo-fuzz was not
+  installed on this host, so sanitizer fuzz builds were not rerun
+- `node --test scripts/corpus/*.test.mjs scripts/corpus/test/*.test.mjs`: all
+  46 tests passed after treating Windows directory-`fsync` `EPERM` as the
+  platform's unsupported directory-sync operation and making cargo-build
+  outcomes injectable in the cross-platform bootstrap test
+- `tests/persistent_index.rs` covers v1/v2 locator equivalence, no implicit
+  locator construction, raw/normalized basis, duplicates, prefix and physical
+  traversal, forced external merging, empty files, cancellation, observed
+  source mutation, length/mtime staleness, lazy checksum rejection, hostile
+  geometry, truncation, revision/identity mismatch, a real FNV-1a collision,
+  fixed-cost open, writer destinations without `Read`, and readable-encrypted
+  sources. Private core regressions prove fixed 248-byte opening for both tiny
+  and large checksum directories, streaming Adler equivalence, amortized arena
+  growth, and 33 initial sort runs through the 32-way merge-fan-in boundary.
+
+Persistent-index construction follow-up on Windows on 2026-09-05:
+
+- `cargo test --locked --lib`: 63 passed;
+  `cargo test --locked --test persistent_index`: 22 passed; and
+  `cargo test --locked --test public_api`: 1 passed after the format-2
+  metadata-identity/lazy-checksum redesign.
+- `cargo test --locked --all-targets --all-features` passed (three private
+  corpus tests ignored by design); strict all-target/all-feature clippy,
+  rustdoc, and doctests also passed.
+- The release `examples/persistent_index_cost` harness used the default 32 MiB
+  build-memory and 64 KiB chunk limits. On the 158,987-row `oaldZhEn.mdx`, three
+  warmed in-memory locator builds took 40/42/42 ms, create-new persistent builds
+  took 58/57/57 ms, and generic writer builds took 59/62/58 ms. The sidecar is
+  4,185,324 bytes versus 3,548,878 retained locator bytes.
+- On the measured 4,362,467-row TLD sample, three warmed in-memory locator
+  builds took 2,012/1,991/1,985 ms, create-new persistent builds took
+  2,170/2,114/2,121 ms, and writer builds took 2,113/2,151/2,163 ms. The
+  sidecar is 137,027,356 bytes versus 119,568,874 retained locator bytes. The
+  large-case persistent cost is now about 6–8% over the in-memory build; the
+  remainder is durable section/run I/O, checksum generation, and sync rather
+  than source/artifact hashing or full-output verification. These are local
+  warm-cache diagnostic observations, not a cross-machine performance promise.
+- The AALookup host integration then measured the same release implementation
+  three times for each requested source. Median in-memory/persistent construction
+  was 40.934/54.710 ms for 158,987-row `oaldZhEn.mdx`, 31.996/46.618 ms for
+  137,212-row `辭海第七版.mdx`, and 2,002.529/2,515.845 ms for the 4,362,467-row
+  TLD source. Median host warm-open/first-positive-query time was
+  0.372/3.541 ms, 0.398/3.601 ms, and 2.582/7.953 ms respectively. The host
+  counters include required MDX metadata reads; the isolated sidecar open test
+  remains the exact size-independent result at two reads and 248 bytes.
+
+Paged-locator follow-up validation:
+
+- `cargo test --locked --all-targets --all-features`, strict clippy, strict
+  rustdoc, and doctests passed; only the same three private-corpus tests were
+  ignored
+- the 4,096-duplicate regression proves the complete-result API can exceed a
+  tight match budget while a five-row persistent page succeeds and retains
+  exactly its requested ordinal bytes
+- AALookup's `npm run mdictlib:check` sibling-candidate seam passed, including
+  its bounded ordinal-window reuse and persistent-index budget regressions
+
 ### Regression evidence against the pre-v1 baseline
 
 - **Public API at the version 1 cutover**: a source-level comparison of every
   public item reachable from `lib.rs` against the `v0.1.0` worktree was
   **identical** (126 items). The later `0.2.2` scan/completion methods and the
-  `0.2.3` large-dictionary preset are deliberate compatible additions.
+  `0.2.3` large-dictionary preset are deliberate compatible additions. The
+  `0.2.4` persistent-index candidate is another additive API and is pinned by
+  `tests/public_api.rs`.
 - **Version 2 corpus logical facts**: eight v2 artifacts audited with
   `examples/corpus_audit` under both the pre-refactor build (`1b3f6bb`) and the
   current build produced **byte-identical** entry counts, key digests, and
@@ -665,10 +817,11 @@ baselines the v1 program must not regress.
 ## Release Hygiene
 
 - `.github/workflows/ci.yml` exists.
-- `CHANGELOG.md` records `0.1.0` through `0.2.3` plus future unreleased
-  changes.
+- `CHANGELOG.md` records `0.1.0` through the published `0.2.3` plus the
+  unreleased `0.2.4` persistent-index candidate.
 - `README.md`, crate rustdoc, examples, public API tests, and package metadata
-  describe the same current `0.2.3` dependency baseline and API.
+  describe the same current `0.2.4` source API and distinguish it from the
+  published `0.2.3` package.
 - `Cargo.toml` has `autobins = false` and a deliberate package include list.
 - Private corpus bytes, private manifests, temporary files, benchmark raw
   output, and `draft/` are not packaged.
@@ -683,10 +836,10 @@ baselines the v1 program must not regress.
 - Tag: `https://github.com/lonelam/mdictlib/tree/v0.1.0`
 - Package: `https://crates.io/crates/mdictlib/0.2.3`
 
-`0.2.3` is published on crates.io and selected in crate metadata. The Git
-repository currently exposes only the `v0.1.0` release tag. Creating missing or
-future tags, publishing another package, and pushing release state remain
-explicit maintainer actions.
+`0.2.3` is published on crates.io. Crate metadata now selects the unreleased
+`0.2.4` candidate, and the Git repository currently exposes only the `v0.1.0`
+release tag. Creating missing or future tags, publishing another package, and
+pushing release state remain explicit maintainer actions.
 
 ## Active TODOs
 
@@ -700,6 +853,15 @@ explicit maintainer actions.
    performance baseline; the 2026-08-10 numbers predate this work.
 4. Reconcile the missing `v0.2.3` Git tag when a maintainer authorizes that
    release-hygiene action. **Not authorized.**
+5. Extend the new Windows OALD/辭海/TLD persistent-index measurements to the
+   authorized multi-platform corpus, including cold/warm positional reads and
+   host-level handle residency, before assigning cross-machine expectations.
+6. Obtain explicit maintainer authorization before publishing, tagging, or
+   pushing the `0.2.4` candidate. **Not authorized.**
+7. After authorized publication, move AALookup and its dictionary-scale harness
+   from the adjacent-checkout bridge to the registry `0.2.4` dependency, update
+   their lockfiles and parser-boundary assertion together, and keep the default
+   integration free of Cargo-feature and environment-`cfg` gates.
 
 ## Known Risks
 
@@ -727,4 +889,14 @@ explicit maintainer actions.
   creator spellings outside the reviewed corpus remain a compatibility risk.
 - zlib in a v1 file is decoded by the shared envelope but has never been seen in
   an authorized artifact, so creator compatibility is untested.
-- The benchmark baseline predates this work and has not been re-measured.
+- The frozen general parser benchmark baseline predates this work. The new
+  Windows OALD/辭海/TLD measurements cover persistent construction, but do not
+  replace a multi-platform corpus baseline.
+- Persistent-index behavior has synthetic corruption, staleness, duplicate,
+  collision, cancellation, and source-mutation coverage, but no checked-in
+  cross-platform large-corpus performance baseline yet. The current safe
+  positional-read backend intentionally makes no mmap or zero-residency claim.
+- Source length and modification time are deliberately a low-cost freshness
+  stamp for a host's path-scoped cache namespace. Timestamp spoofing or an
+  adversary able to rewrite both sidecar and checksums is outside this local,
+  rebuildable-cache trust model; positive rows are still source-verified lazily.
