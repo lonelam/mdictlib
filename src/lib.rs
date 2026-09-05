@@ -20,10 +20,6 @@
 //! Version 1 support covers unencrypted files using uncompressed or LZO blocks.
 //! Encrypted version 1 files and the ISO8859-1 text label are refused with a
 //! precise error rather than parsed speculatively.
-//!
-//! Version `0.2.0` adds MDict major version 1 support behind the same public
-//! API as the first public release, `0.1.0`. The `0.2.4` package candidate adds
-//! the persistent MDX key-index API without changing existing methods.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

@@ -1,20 +1,20 @@
-#![allow(unused_imports)]
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Arc;
 
 use super::MIN_BUILD_MEMORY_BYTES;
+use super::cache::IndexSource;
 use super::{
     BuiltIndex, ENDIAN_MARKER, HEADER_BYTES, HEADER_CHECKSUM_BYTES, HEADER_FIELDS_BYTES,
-    HEADER_PREFIX_BYTES, IndexHeader, IndexSource, MAGIC, MIN_CHUNK_BYTES, SECTION_COUNT,
-    SectionDescriptor, SectionFile, SectionKind,
+    HEADER_PREFIX_BYTES, IndexHeader, MAGIC, MIN_CHUNK_BYTES, SECTION_COUNT, SectionDescriptor,
+    SectionFile, SectionKind,
 };
 use crate::error::{Error, Result};
 use crate::format::common::checksum::adler32;
 use crate::index::{
     KEY_INDEX_FORMAT_REVISION, KEY_INDEX_NORMALIZATION_REVISION, KEY_INDEX_PARSER_REVISION,
-    KeyIndexBuild, KeyIndexOptions, KeyIndexRejection, KeyIndexSourceIdentity,
+    KeyIndexOptions, KeyIndexRejection, KeyIndexSourceIdentity,
 };
 use crate::limits::{
     MemoryBudget, checked_usize, ensure_u64_ceiling, ensure_usize_limit, try_reserve_vec,

@@ -168,12 +168,6 @@ impl CachedFailure {
 }
 
 /// One open dictionary, shared by MDX and MDD and by every wire version.
-///
-/// The core is deliberately version-blind: it holds a
-/// [`ValidatedLayout`] whose geometry has already been widened, range-checked,
-/// and limit-checked by whichever grammar produced it, plus the statically
-/// selected wire operations it calls on a lazy cache miss. Nothing here can
-/// observe or branch on the file's declared version.
 pub(crate) struct MdictFile {
     kind: ContainerKind,
     source: Arc<FileSource>,

@@ -11,15 +11,7 @@ use crate::limits::{
 };
 use crate::types::KeyOrdinal;
 
-/// Every key's normalized text in one allocation, plus the orderings needed to
-/// answer a query.
-///
-/// Storing normalized text alone, rather than a normalized *and* a raw copy per
-/// row, is what keeps this affordable on a multi-million-entry file: a
-/// raw-exact match necessarily normalizes to the same text as its query, so
-/// every raw candidate already lies inside the normalized equal range. The
-/// range is then filtered by a cheap raw-text digest, and only a digest hit
-/// pays for the key block that proves it.
+/// Normalized key arena and physical-ordinal indexes for global lookup.
 pub(crate) struct KeyLocator {
     /// Normalized keys concatenated in physical order.
     text: Box<str>,
@@ -178,9 +170,7 @@ impl MdictFile {
             return Ok(None);
         };
 
-        // Raw-exact still wins over the normalized fallback, but the search for
-        // it is confined to this range: raw equality implies normalized
-        // equality, so nothing outside can be raw-exact.
+        // Raw equality implies normalized equality.
         if let Some(exact) = self.raw_exact_within(&locator, &range, query)? {
             return Ok(Some(LocatedKeys {
                 basis: LocatorBasis::RawExact,
@@ -197,9 +187,7 @@ impl MdictFile {
         }))
     }
 
-    /// Locates the requested physical-ordinal window without materializing the
-    /// complete duplicate set. Raw-exact precedence is still decided across
-    /// the complete normalized equal range before the page basis is returned.
+    /// Returns a physical-ordinal window after global raw-exact resolution.
     pub(crate) fn locate_key_page(
         &self,
         query: &str,
@@ -485,8 +473,6 @@ impl MdictFile {
                     .ok_or(Error::InvalidFormat("key locator size overflow"))?;
                 enforce_locator_size(estimated_bytes, self.limits.locator_bytes)?;
                 retained_memory.grow(normalized_len)?;
-                // Amortized rather than exact: growing by one key at a time
-                // would reallocate the whole arena on every entry.
                 try_reserve_string_amortized(&mut text, normalized_len, "key locator text")?;
                 self.normalizer.normalize_into(&entry.key, &mut text);
                 bounds.push(
@@ -572,8 +558,7 @@ impl KeyLocator {
 fn row_text<'a>(text: &'a str, bounds: &[u32], row: u32) -> &'a str {
     let index = row as usize;
     let (Some(start), Some(end)) = (bounds.get(index), bounds.get(index + 1)) else {
-        // Only reachable through a corrupt in-memory index, which the build
-        // path rules out; an empty key simply sorts first.
+        // Construction validates these bounds; invalid internal rows sort first.
         return "";
     };
     text.get(*start as usize..*end as usize).unwrap_or_default()

@@ -1,4 +1,3 @@
-#![allow(unused_imports)]
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::fs::File;
@@ -10,7 +9,7 @@ use super::build::{BufferedScratchWriter, SectionScratchWriter, scratch_write_bu
 use super::format::{check_cancelled, read_u64_file, scratch_file, write_u32, write_u64};
 use super::{MAX_MERGE_FAN_IN, RUN_READ_BUFFER_BYTES, SectionFile, SectionKind};
 use crate::error::{Error, Result};
-use crate::index::{KeyIndexOptions, KeyIndexRejection};
+use crate::index::KeyIndexOptions;
 use crate::limits::{
     checked_usize, ensure_usize_limit, try_reserve_vec, try_reserve_vec_amortized,
 };

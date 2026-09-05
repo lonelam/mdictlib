@@ -58,10 +58,6 @@ impl KeyIndexOptions {
     }
 
     /// Sets the maximum combined fixed-header and on-disk checksum-table length.
-    ///
-    /// Opening still reads only the fixed header and one checksum page lazily;
-    /// this limit bounds accepted geometry and construction bookkeeping rather
-    /// than requesting an eager metadata read.
     pub const fn with_max_metadata_bytes(mut self, value: usize) -> Self {
         self.max_metadata_bytes = value;
         self
@@ -326,10 +322,8 @@ impl std::error::Error for KeyIndexRejection {}
 
 /// Open, source-bound persistent key index.
 ///
-/// The fixed header and section geometry are validated at open. The checksum
-/// directory and large sections remain lazy; a section chunk's expected
-/// checksum and exact bytes are read only when that chunk is used. These
-/// unkeyed checksums detect accidental corruption, not adversarial replacement.
+/// Header validation is eager; section verification is lazy. Unkeyed checksums
+/// detect accidental corruption, not adversarial replacement.
 /// Treat the sidecar as a local, disposable cache rather than authenticated
 /// source material.
 #[derive(Clone)]

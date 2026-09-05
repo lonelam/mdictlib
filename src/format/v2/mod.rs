@@ -7,7 +7,7 @@
 //!
 //! This module may not reference the core, the MDX/MDD facades, or
 //! [`crate::format::v1`]. Its only output is a
-//! [`ValidatedLayout`](crate::format::common::descriptors::ValidatedLayout).
+//! [`ValidatedLayout`].
 
 pub(crate) mod crypto;
 mod keyword;

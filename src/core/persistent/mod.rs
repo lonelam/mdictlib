@@ -1,9 +1,7 @@
-#![allow(unused_imports)]
 use std::fs::File;
 
 use super::MdictFile;
-use crate::error::Result;
-use crate::index::{KeyIndexBuild, KeyIndexOptions, KeyIndexRejection, KeyIndexSourceIdentity};
+use crate::index::{KeyIndexBuild, KeyIndexSourceIdentity};
 
 mod build;
 mod cache;
@@ -11,16 +9,9 @@ mod format;
 mod query;
 mod sort;
 
-pub(crate) use build::{BufferedScratchWriter, SectionScratchWriter};
 pub(crate) use build::{build_to_path, build_to_writer, source_identity};
-pub(crate) use cache::IndexSource;
 pub(crate) use cache::{PersistentKeyIndex, open};
-pub(crate) use format::{
-    align8, chunk_count, parse_header, push_i128, push_u32, push_u64, read_index_header,
-    scratch_file,
-};
 pub(crate) use query::{locate, locate_page, prefix, scan};
-pub(crate) use sort::{ArenaRecord, RunRecord, SortBuffer, merge_runs, write_sorted_run};
 
 const MAGIC: [u8; 8] = *b"MDKIDX01";
 const ENDIAN_MARKER: u32 = 0x0102_0304;
@@ -106,15 +97,6 @@ pub(crate) struct SectionFile {
     len: u64,
     checksums: Vec<u32>,
 }
-
-#[cfg(test)]
-use crate::format::common::checksum::adler32;
-#[cfg(test)]
-use crate::limits::MemoryBudget;
-#[cfg(test)]
-use std::io::{Seek, SeekFrom, Write};
-#[cfg(test)]
-use std::sync::Arc;
 
 #[cfg(test)]
 mod tests;

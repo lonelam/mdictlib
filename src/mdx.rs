@@ -266,11 +266,8 @@ impl MdxFile {
     /// Builds a complete persistent key index into a caller-owned sink with
     /// bounded sort memory and cancellation checkpoints.
     ///
-    /// Construction uses scratch sections and never constructs or retains the
-    /// process-lifetime key locator used by [`Self::locate`]. The final artifact
-    /// is streamed to `destination` without being read back. Any returned error
-    /// still requires the caller to discard destination bytes: a write can be
-    /// partial, or a final metadata-stability check can reject a complete one.
+    /// Does not initialize the global locator used by [`Self::locate`]. The
+    /// destination is never read back and must be discarded on any error.
     ///
     /// # Errors
     ///
@@ -318,10 +315,7 @@ impl MdxFile {
     /// Opens a caller-selected persistent key index bound to `expected` and
     /// this dictionary's current source metadata.
     ///
-    /// Opening reads a fixed-size header, verifies its checksum, and validates
-    /// all section geometry without reading the checksum directory or data
-    /// sections. An expected checksum page and section chunk are read lazily
-    /// before that chunk's exact bytes are interpreted.
+    /// Validates the fixed header at open; section data is verified lazily.
     ///
     /// # Errors
     ///

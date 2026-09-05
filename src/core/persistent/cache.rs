@@ -1,4 +1,3 @@
-#![allow(unused_imports)]
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 #[cfg(test)]

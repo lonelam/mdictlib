@@ -246,8 +246,6 @@ impl MdictFile {
             .source
             .read_exact_at(block.comp_offset, comp_size, "key block")?;
         let decoded = decode_block("key block", &block_bytes, decomp_size, &self.limits)?;
-        // The wire grammar for a key row was selected once during open. The
-        // core never learns which one it is, and never branches per entry.
         let context = KeyRowContext {
             encoding: self.layout.key_encoding,
             expected_entries: block.entry_count,

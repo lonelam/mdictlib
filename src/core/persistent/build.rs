@@ -1,4 +1,3 @@
-#![allow(unused_imports)]
 use std::fs::{File, OpenOptions as FsOpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::mem::size_of;
@@ -12,19 +11,12 @@ use super::format::{
 use super::sort::{
     ArenaRecord, RunRecord, SortBuffer, merge_runs, write_sorted_order, write_sorted_run,
 };
-use super::{BuiltIndex, HEADER_BYTES, MIN_BUILD_MEMORY_BYTES, SectionFile, SectionKind};
+use super::{BuiltIndex, HEADER_BYTES, SectionFile, SectionKind};
 use crate::core::locator::raw_digest;
 use crate::error::{Error, Result};
 use crate::index::{KeyIndexBuild, KeyIndexOptions, KeyIndexSourceIdentity};
-use crate::limits::{
-    checked_usize, ensure_u64_ceiling, ensure_usize_limit, try_reserve_vec,
-    try_reserve_vec_amortized,
-};
+use crate::limits::try_reserve_vec;
 use crate::types::ContainerKind;
-
-pub(crate) fn source_identity(dictionary: &MdictFile) -> Result<KeyIndexSourceIdentity> {
-    source_identity_once(dictionary)
-}
 
 pub(crate) fn build_to_writer<W, C>(
     dictionary: &MdictFile,
@@ -273,7 +265,7 @@ where
         });
     }
 
-    let before = source_identity_once(dictionary)?;
+    let before = source_identity(dictionary)?;
     let metadata_plan = build_metadata_plan(dictionary.len(), options)?;
     let scratch_buffer_bytes = scratch_write_buffer_bytes(options);
     let mut text = SectionScratchWriter::new(
@@ -308,7 +300,7 @@ where
         let entries = match dictionary.decode_key_block(block_index) {
             Ok(entries) => entries,
             Err(error) => {
-                if source_identity_once(dictionary)? != before {
+                if source_identity(dictionary)? != before {
                     return Err(Error::SourceChanged {
                         operation: "building persistent key index",
                     });
@@ -574,7 +566,7 @@ fn build_metadata_plan(rows: u64, options: &KeyIndexOptions) -> Result<BuildMeta
     })
 }
 
-fn source_identity_once(dictionary: &MdictFile) -> Result<KeyIndexSourceIdentity> {
+pub(crate) fn source_identity(dictionary: &MdictFile) -> Result<KeyIndexSourceIdentity> {
     let current = dictionary.source.current_identity()?;
     if current.len != dictionary.source.len() {
         return Err(Error::SourceChanged {
@@ -593,7 +585,7 @@ fn ensure_source_unchanged(
     expected: KeyIndexSourceIdentity,
     operation: &'static str,
 ) -> Result<()> {
-    if source_identity_once(dictionary)? != expected {
+    if source_identity(dictionary)? != expected {
         return Err(Error::SourceChanged { operation });
     }
     Ok(())

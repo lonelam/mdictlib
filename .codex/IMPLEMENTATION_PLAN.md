@@ -244,6 +244,13 @@ common header
 `WireVersion` is a private enum in `src/format/mod.rs`. `src/format/mod.rs` is
 the only file in the crate that contains a `match` on it.
 
+The generated version is resolved before `RequiredEngineVersion` is examined,
+so an unsupported generated grammar takes precedence over malformed
+compatibility metadata. Every dot-separated component of both attributes must
+be a non-empty ASCII decimal integer; only the generated major component
+selects the grammar. Each `parse_layout` receives the same `LayoutRequest`, and
+any grammar error propagates without trying another version.
+
 ### 4.2 Physical module layout
 
 ```text
@@ -412,6 +419,14 @@ an offset and limit and return `KeyMatchPage`: global basis and exact total are
 preserved, but only the requested ascending physical ordinals are retained.
 An offset at or beyond the total returns an empty `Some` page rather than a
 query miss.
+
+The in-memory locator retains normalized text in one shared arena, plus row
+bounds, normalized ordering, and raw-text digests. It does not retain a second
+raw-text copy per row. Raw equality implies normalized equality, so all raw
+candidates lie inside the normalized equal range. Digests filter that range;
+source key blocks prove each digest hit. The text arena uses amortized growth to
+avoid reallocating all preceding keys for every appended key. Paging resolves
+raw-exact precedence across the entire range before returning a window.
 
 Known logical header attributes are resolved ASCII-case-insensitively while
 raw spellings remain inspectable. Semantically equivalent aliases are accepted

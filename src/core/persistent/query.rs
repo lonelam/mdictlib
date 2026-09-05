@@ -1,4 +1,3 @@
-#![allow(unused_imports)]
 use std::mem::size_of;
 use std::ops::ControlFlow;
 

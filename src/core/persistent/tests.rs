@@ -1,9 +1,23 @@
-use super::format::read_u32_file;
-use super::*;
-use super::*;
+use super::build::SectionScratchWriter;
+use super::cache::IndexSource;
+use super::format::{
+    align8, chunk_count, parse_header, push_i128, push_u32, push_u64, read_index_header,
+    read_u32_file, scratch_file,
+};
+use super::sort::{ArenaRecord, RunRecord, SortBuffer, merge_runs, write_sorted_run};
+use super::{
+    ENDIAN_MARKER, HEADER_BYTES, HEADER_CHECKSUM_BYTES, HEADER_FIELDS_BYTES, HEADER_PREFIX_BYTES,
+    MAGIC, MAX_MERGE_FAN_IN, MIN_CHUNK_BYTES, SECTION_COUNT, SectionDescriptor, SectionKind,
+};
+use crate::format::common::checksum::adler32;
+use crate::index::KeyIndexOptions;
 use crate::index::{
     KEY_INDEX_FORMAT_REVISION, KEY_INDEX_NORMALIZATION_REVISION, KEY_INDEX_PARSER_REVISION,
 };
+use crate::limits::MemoryBudget;
+use std::io::{Seek, SeekFrom, Write};
+use std::mem::size_of;
+use std::sync::Arc;
 
 fn parseable_header(text_chunks: u64) -> (Vec<u8>, u64, usize) {
     let chunk_bytes = u64::try_from(MIN_CHUNK_BYTES).unwrap();
