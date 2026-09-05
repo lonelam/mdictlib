@@ -4,6 +4,8 @@ All notable changes are recorded here.
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-09-05
+
 ### Added
 
 - `ChecksumPolicy::{Skip, Verify}` and `OpenOptions::with_checksum_policy`.
@@ -63,8 +65,8 @@ All notable changes are recorded here.
 
 ### Package
 
-- Bumped the package candidate from `0.2.3` to `0.2.4` for the compatible
-  additive API. Publishing, tagging, and pushing remain maintainer actions.
+- Bumped the package from `0.2.4` to `0.2.5` for explicit source and
+  persistent-index `ChecksumPolicy` controls, with `Skip` as the default.
 
 ## [0.2.3] - 2026-08-13
 
@@ -292,7 +294,9 @@ digests, and payload digests are unchanged.
   to the library, examples, tests, documentation, and license material.
 - Released version `0.1.0` as the first public release.
 
-[Unreleased]: https://github.com/lonelam/mdictlib/compare/31a3e9f...HEAD
+[Unreleased]: https://github.com/lonelam/mdictlib/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/lonelam/mdictlib/compare/d00d360...v0.2.5
+[0.2.4]: https://github.com/lonelam/mdictlib/compare/31a3e9f...d00d360
 [0.2.3]: https://github.com/lonelam/mdictlib/compare/bc72444...31a3e9f
 [0.2.2]: https://github.com/lonelam/mdictlib/compare/fe22dfd...bc72444
 [0.2.1]: https://github.com/lonelam/mdictlib/compare/ad4afaa...fe22dfd

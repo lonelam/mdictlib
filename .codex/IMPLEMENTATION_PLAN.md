@@ -1,6 +1,6 @@
 # mdictlib Implementation Roadmap
 
-Last updated: 2026-09-05 (v0.2.4 package candidate; v0.2.3 published)
+Last updated: 2026-09-05 (v0.2.5 release candidate; v0.2.4 published)
 
 ## 1. Release State And Active Program
 
@@ -9,8 +9,8 @@ Last updated: 2026-09-05 (v0.2.4 package candidate; v0.2.3 published)
 
 The **MDict version 1 compatibility program is implemented**. Milestones 1
 through 6 are complete, and its `0.2.0` release decision is historical. Crate
-metadata is now at the unreleased **`0.2.4`** persistent-index candidate while
-crates.io remains at **`0.2.3`**; the repository still exposes only the
+metadata is now at the unreleased **`0.2.5`** checksum-policy candidate while
+crates.io remains at **`0.2.4`**; the repository currently exposes only the
 `v0.1.0` tag. Any future publish, tag, or push remains an explicit maintainer
 action.
 
@@ -143,7 +143,7 @@ cross-version grammar retry, and section 8's no-retry rule does not forbid it.
 MDict major version 1 `.mdx` and `.mdd` behind the same public API, the same
 shared core, and the same limits. Adding v1 did not change the public API.
 
-### Added in the `0.2.4` candidate
+### Added in the `0.2.4` release
 
 A production persistent MDX key-index facility behind additive APIs. mdictlib
 owns normalization, index revisions and bytes, bounded construction, source
@@ -1032,7 +1032,7 @@ All are enforced by `tests/architecture.rs` and **pass**.
 | every accepted v1 artifact completes ordinal, raw-lookup, duplicate, and payload validation | pass — 407 of 453 |
 | every rejected artifact has a structured retained classification | pass — 46 of 46 |
 | malformed input cannot panic or bypass limits | pass — mutation and truncation sweeps plus ten AddressSanitizer fuzz targets |
-| public API diff at the version 1 cutover is empty | pass — 126 items identical; later `0.2.2` scan/completion methods, the `0.2.3` large-limit preset, and the `0.2.4` persistent-index candidate are compatible additions |
+| public API diff at the version 1 cutover is empty | pass — 126 items identical; later `0.2.2` scan/completion methods, the `0.2.3` large-limit preset, and the `0.2.4` persistent-index release are compatible additions |
 | benchmark baseline within its 2x diagnostic threshold | **not re-measured**; the checked-in baseline predates this work |
 | real v1 MDD validation | pass — 16 of 16 acquired artifacts fully validated |
 
