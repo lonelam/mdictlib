@@ -315,7 +315,9 @@ impl MdxFile {
     /// Opens a caller-selected persistent key index bound to `expected` and
     /// this dictionary's current source metadata.
     ///
-    /// Validates the fixed header at open; section data is verified lazily.
+    /// Validates the fixed header at open; section data is checked lazily when
+    /// [`KeyIndexOptions::checksum_policy`](crate::KeyIndexOptions::checksum_policy)
+    /// is [`ChecksumPolicy::Verify`](crate::ChecksumPolicy::Verify).
     ///
     /// # Errors
     ///

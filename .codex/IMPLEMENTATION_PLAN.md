@@ -50,14 +50,23 @@ Implemented in this candidate:
 2. Construction reads the same parser-owned source handle, never builds the
    process locator as a prerequisite, spills bounded sort runs, merges with a
    bounded fan-in, checks cancellation, and never rereads final output.
-3. The artifact verifies its header and independently checksummed chunks;
-   every lazy positional read interprets the exact bytes whose contributing
-   chunks were verified. The unkeyed checksums detect corruption rather than
+3. The artifact stores checksum slots alongside its sections. With
+   `KeyIndexOptions::checksum_policy = Verify`, the header and independently
+   checksummed chunks are verified; every lazy positional read interprets the
+   exact bytes whose contributing chunks were verified. With `Skip`, the
+   existing checksum slots are reserved as zero markers and no chunk checksum
+   is calculated. The unkeyed checksums detect corruption rather than
    adversarial replacement. Raw digests are filters only and source bytes prove
-   a raw match, so collisions cannot change lookup semantics. The loader
-   reads the checksum directory through one bounded lazy page, so opening cost
-   does not grow with artifact size.
-4. Synthetic v1/v2 differential, duplicate, prefix, cancellation, source-change,
+   a raw match, so collisions cannot change lookup semantics. Verify mode reads
+   the checksum directory through one bounded lazy page.
+4. MDict source decoding exposes an explicit `ChecksumPolicy` through
+   `OpenOptions`. `Skip` is the default throughput policy and bypasses optional
+   header/block/zlib checksum comparisons while retaining size, range,
+   decompression, complete-stream, and structural checks. `Verify` restores
+   fail-closed checksum mismatch errors. Persistent `.aaidx` uses its own
+   `KeyIndexOptions::checksum_policy`, also defaulting to `Skip`, so index
+   construction does not spend CPU on chunk checksums unless `Verify` is set.
+5. Synthetic v1/v2 differential, duplicate, prefix, cancellation, source-change,
    hostile-geometry, truncation, corruption, revision/identity mismatch, digest-
    collision, readable-encrypted-source indexing, fixed-open-byte, and
    greater-than-32-run merge tests are present. The current Windows package
@@ -504,7 +513,11 @@ checksum directory or any data section. The expected checksum is loaded through
 one lazy 4 KiB page; every row is interpreted from the exact verified section
 bytes and validates local bounds/UTF-8. Runtime sidecar reads are serialized per
 index. Header, checksum-page, chunk, and returned-byte memory is charged to the
-originating dictionary budget.
+originating dictionary budget. Adler-32 reduces its accumulators once per
+5,552-byte block rather than once per byte; this preserves the format checksum
+while avoiding a modulo operation in the key/record decode hot path. The
+bounded section cache still permits a random query to re-read and re-check a
+chunk after another chunk replaces it.
 
 Construction streams physical text/bounds/digests through bounded scratch
 write buffers and appends normalized bytes to one arena with offset records.
@@ -670,8 +683,11 @@ These rules are absolute and apply to every milestone below.
    keyword-index checksum disambiguation in section 2 is inside one major
    version and is unaffected.)
 7. **No permissive parsing.** No brute-force parsing, no grammar retries, no
-   silent checksum bypasses, no heuristic encoding changes, no lossy fallback.
-   An unresolved artifact stays classified as unresolved.
+   heuristic encoding changes, no lossy fallback. The explicit default
+   `ChecksumPolicy::Skip` only bypasses optional checksum comparisons; it does
+   not bypass geometry, decompression, complete-stream, or structural parsing.
+   `ChecksumPolicy::Verify` retains fail-closed checksum errors. An unresolved
+   artifact stays classified as unresolved.
 8. **Conversion and writer tools stay outside the library.** Any converter or
    writer built during this program is a separately reviewed diagnostic or test
    oracle. It is never linked into the published crate and never called by

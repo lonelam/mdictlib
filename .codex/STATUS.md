@@ -1,6 +1,6 @@
 # mdictlib Status
 
-Last updated: 2026-09-04 (v0.2.4 package candidate; v0.2.3 published)
+Last updated: 2026-09-05 (v0.2.4 package candidate; v0.2.3 published)
 
 ## Current Snapshot
 
@@ -166,7 +166,7 @@ version enum in the core, no per-entry branch, and no trait object.
 ### Persistent MDX key indexes
 
 - `KEY_INDEX_REVISION` aggregates independently exposed format,
-  parser/layout, and normalization revisions (`f2-p1-n1` in this candidate).
+  parser/layout, and normalization revisions (`f3-p1-n1` in this candidate).
 - `key_index_source_identity()` reads source length and filesystem modification
   time from the already-open `FileSource` without scanning contents, and binds
   those values plus the parsed physical key count. Hosts namespace each local
@@ -189,11 +189,13 @@ version enum in the core, no per-entry branch, and no trait object.
   normalized text and `u64` bounds, physical raw digests, and physical ordinals
   sorted by normalized text then ordinal.
 - Open reads a fixed 24-byte prefix and 224-byte header, validates its checksum
-  and all section geometry, and does not read the checksum directory or data
-  sections. Expected checksums are fetched through one lazy bounded page; exact
-  verified section bytes, rather than a verification flag followed by a second
-  read, are interpreted. Those caches and transient results remain charged to
-  the originating dictionary memory budget.
+  when `KeyIndexOptions::checksum_policy` is `Verify`, and always validates all
+  section geometry without reading data sections. Verify-mode expected
+  checksums are fetched through one lazy bounded page; exact verified section
+  bytes, rather than a verification flag followed by a second read, are
+  interpreted. Skip mode does not allocate that checksum page. Those caches
+  and transient results remain charged to the originating dictionary memory
+  budget.
 - Indexed lookup preserves global raw-exact precedence, normalized fallback,
   all duplicate physical ordinals, normalized prefix order, and physical scan
   order. A raw digest only filters candidates; a source key-block read proves
@@ -232,6 +234,8 @@ version enum in the core, no per-entry branch, and no trait object.
 ### Limits and diagnostics
 
 - `OpenOptions` borrows reusable options and accepts a fully wired `Limits`.
+- `OpenOptions` also exposes `ChecksumPolicy`; `Skip` is the default for MDict
+  wire checksum comparisons, while `Verify` restores mismatch detection.
 - Limits cover header XML/attributes, indexes, block metadata, compressed and
   decoded blocks, per-block key counts, materialized records, locator rows and
   bytes, and aggregate working memory.
@@ -316,8 +320,9 @@ lookbehind matches, not only literal streams.
   LZO output is exactly bounded.
 - Record-index length is exactly `block_count * 16`; trailing data and invalid
   source ranges are rejected.
-- Key-block counts are checked before each push, terminators/checksums are
-  validated, and first/last summaries use creator-compatible normalization.
+- Key-block counts are checked before each push, terminators are validated,
+  checksum comparisons follow `ChecksumPolicy`, and first/last summaries use
+  creator-compatible normalization.
 - The legacy v2 keyword-index fallback retains exact header/index checksums,
   count and size sums, full index consumption, decoded text, and block-boundary
   validation; it is not a general permissive parse mode.
@@ -419,6 +424,26 @@ Persistent-index construction follow-up on Windows on 2026-09-05:
   0.372/3.541 ms, 0.398/3.601 ms, and 2.582/7.953 ms respectively. The host
   counters include required MDX metadata reads; the isolated sidecar open test
   remains the exact size-independent result at two reads and 248 bytes.
+
+Checksum hot-path follow-up on 2026-09-05:
+
+- Common Adler-32 now reduces its accumulators once per 5,552-byte block,
+  matching the existing persistent-index streaming implementation. A boundary
+  regression compares the optimized result with the bytewise reference.
+- `ChecksumPolicy::Skip` is now the default for MDict header, outer block, and
+  zlib inner checksum comparisons. It does not skip size, range, decompression,
+  complete-stream, or structural checks. `Verify` restores fail-closed checksum
+  mismatch errors. The v2 encrypted keyword-index checksum remains necessary
+  as key material, and the small v2 header checksum remains a layout signal.
+- Persistent-index checksums use their own `KeyIndexOptions::checksum_policy`,
+  also defaulting to `Skip`. `Verify` checks decoded sidecar chunks on first
+  use, while repeated access to a cached chunk does not recompute it. The
+  persistent index retains one chunk per section, so random cross-chunk access
+  can still incur another read and checksum under `Verify`.
+- A standalone 512 MiB release microbenchmark measured the old bytewise Adler
+  loop at about 854 ms versus about 95 ms after block reduction (same result,
+  roughly 9x faster). This is a checksum microbenchmark, not a full-corpus
+  performance claim.
 
 Paged-locator follow-up validation:
 

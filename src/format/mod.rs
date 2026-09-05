@@ -45,7 +45,13 @@ pub(crate) fn open_layout(
     options: &OpenOptions,
     memory: &Arc<MemoryBudget>,
 ) -> Result<ValidatedLayout> {
-    let header_section = parse_header(source, kind, &options.limits, memory)?;
+    let header_section = parse_header(
+        source,
+        kind,
+        &options.limits,
+        options.checksum_policy,
+        memory,
+    )?;
     let generated_major = declared_major_version(
         header_section.header.generated_by_engine_version(),
         "malformed GeneratedByEngineVersion",

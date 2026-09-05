@@ -291,11 +291,27 @@ impl fmt::Debug for Passcode {
     }
 }
 
+/// Controls whether MDict wire checksums are calculated and compared.
+///
+/// [`ChecksumPolicy::Skip`] is the default for throughput. It does not skip
+/// size, range, decompression, or structural validation. A small checksum may
+/// still be calculated when it is needed to distinguish wire layouts. Use
+/// [`ChecksumPolicy::Verify`] when checksum mismatch detection is required.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChecksumPolicy {
+    /// Skip optional MDict wire checksum comparisons.
+    #[default]
+    Skip,
+    /// Calculate and compare MDict wire checksums.
+    Verify,
+}
+
 /// Options used when opening an MDX or MDD file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenOptions {
     pub(crate) passcode: Option<Passcode>,
     pub(crate) limits: Limits,
+    pub(crate) checksum_policy: ChecksumPolicy,
 }
 
 impl OpenOptions {
@@ -304,6 +320,7 @@ impl OpenOptions {
         Self {
             passcode: None,
             limits: Limits::new(),
+            checksum_policy: ChecksumPolicy::Skip,
         }
     }
 
@@ -321,9 +338,21 @@ impl OpenOptions {
         self
     }
 
+    /// Selects whether MDict wire checksums are verified while decoding.
+    #[must_use]
+    pub const fn with_checksum_policy(mut self, checksum_policy: ChecksumPolicy) -> Self {
+        self.checksum_policy = checksum_policy;
+        self
+    }
+
     /// Returns the configured safety limits.
     pub const fn limits(&self) -> &Limits {
         &self.limits
+    }
+
+    /// Returns the configured MDict wire checksum policy.
+    pub const fn checksum_policy(&self) -> ChecksumPolicy {
+        self.checksum_policy
     }
 }
 

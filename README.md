@@ -221,19 +221,19 @@ physical scans source-verify each visited normalized row and raw digest before
 calling the visitor, so an unchanged-layout source-key mutation rejects the
 index instead of returning stale index text.
 
-Normal open validates the expected metadata identity, revisions, fixed-header
-checksum, file length, and checked section geometry. Format revision 2 performs
-two fixed reads totalling 248 bytes; it does not load the checksum directory or
-any data section. On first use of a section chunk, the corresponding bounded
-checksum page and exact chunk bytes are read. The verified bytes stay in the
-bounded per-section cache and are the bytes interpreted. A positive lookup or
-prefix result is additionally checked against the corresponding current MDX
-source row. Invalid sidecars return `Error::KeyIndexRejected` and never make the
-MDX itself unreadable.
+Normal open validates the expected metadata identity, revisions, file length,
+and checked section geometry. Format revision 3 performs two fixed reads
+totalling 248 bytes; it does not load the checksum directory or any data
+section. In `Verify` mode, the first use of a section chunk reads the
+corresponding bounded checksum page and exact chunk bytes. The verified bytes
+stay in the bounded per-section cache and are the bytes interpreted. A positive
+lookup or prefix result is additionally checked against the corresponding
+current MDX source row. Invalid sidecars return `Error::KeyIndexRejected` and
+never make the MDX itself unreadable.
 
-Header buffers, one 4 KiB checksum page, section chunk caches, and transient
-read results are charged to the originating dictionary's aggregate memory
-budget and reflected in `MemoryUsage` current/peak. Build-only sort arenas,
+Header buffers, the optional 4 KiB Verify-mode checksum page, section chunk
+caches, and transient read results are charged to the originating dictionary's
+aggregate memory budget and reflected in `MemoryUsage` current/peak. Build-only sort arenas,
 scratch files, and artifact disk bytes are not steady-state parser heap.
 Construction decodes the source once, appends normalized bytes to a shared
 arena, writes one-batch ordering directly, and otherwise uses bounded buffered
@@ -245,6 +245,27 @@ proof against an attacker who can rewrite the sidecar and its checksums. The
 metadata stamp likewise does not defend against timestamp spoofing. Persistent
 indexes are local, rebuildable caches; delete and rebuild one after any
 rejection.
+
+MDict source decoding uses [`ChecksumPolicy`](https://docs.rs/mdictlib/latest/mdictlib/enum.ChecksumPolicy.html).
+The default `ChecksumPolicy::Skip` avoids optional header, block-envelope, and
+zlib checksum comparisons for throughput while retaining size, range,
+decompression, complete-stream, and structural validation. Select
+`ChecksumPolicy::Verify` when checksum mismatch errors are required:
+
+```rust,no_run
+use mdictlib::{ChecksumPolicy, MdxFile, OpenOptions};
+
+fn main() -> mdictlib::Result<()> {
+    let options = OpenOptions::new().with_checksum_policy(ChecksumPolicy::Verify);
+    let dictionary = MdxFile::open_with_options("dictionary.mdx", &options)?;
+    println!("{} entries", dictionary.len());
+    Ok(())
+}
+```
+
+Persistent `.aaidx` uses its own `KeyIndexOptions::with_checksum_policy` and
+also defaults to `Skip`, so chunk checksum work is omitted during construction
+and reads unless `Verify` is selected.
 
 The sidecar contains plaintext normalized headwords. Every readable MDX source,
 including version 2 keyword-index encryption, uses the same ordinary index

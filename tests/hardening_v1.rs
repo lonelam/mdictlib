@@ -9,7 +9,7 @@ mod support;
 
 use std::panic;
 
-use mdictlib::{Error, KeyOrdinal, Limits, MdxFile, OpenOptions};
+use mdictlib::{ChecksumPolicy, Error, KeyOrdinal, Limits, MdxFile, OpenOptions};
 
 use support::FixtureKind;
 use support::v1::{V1BlockCoding, V1Fixture, V1FixtureBuilder};
@@ -124,7 +124,8 @@ fn repeated_deterministic_v1_failures_do_not_amplify_memory() {
     let range = fixture.layout.key_blocks[1].clone();
     fixture.corrupt_block_checksum(&range);
     let file = fixture.write("v1-failure-amplification");
-    let dictionary = MdxFile::open(file.path()).unwrap();
+    let options = OpenOptions::new().with_checksum_policy(ChecksumPolicy::Verify);
+    let dictionary = MdxFile::open_with_options(file.path(), &options).unwrap();
 
     let ordinal = KeyOrdinal::new(2);
     let first = dictionary.key_at(ordinal).unwrap_err().to_string();
@@ -149,7 +150,8 @@ fn v1_iterators_stay_exhausted_after_an_error() {
     let range = fixture.layout.record_blocks[1].clone();
     fixture.corrupt_block_checksum(&range);
     let file = fixture.write("v1-iterator-fusion");
-    let dictionary = MdxFile::open(file.path()).unwrap();
+    let options = OpenOptions::new().with_checksum_policy(ChecksumPolicy::Verify);
+    let dictionary = MdxFile::open_with_options(file.path(), &options).unwrap();
 
     let mut entries = dictionary.entries();
     let mut errors = 0;
@@ -176,9 +178,29 @@ fn v1_open_does_not_decode_blocks() {
         fixture.corrupt_block_checksum(&range);
     }
     let file = fixture.write("v1-lazy-open");
-    let dictionary = MdxFile::open(file.path()).expect("open must not decode blocks");
+    let options = OpenOptions::new().with_checksum_policy(ChecksumPolicy::Verify);
+    let dictionary =
+        MdxFile::open_with_options(file.path(), &options).expect("open must not decode blocks");
     assert_eq!(dictionary.len(), 4);
     assert!(dictionary.key_at(KeyOrdinal::new(0)).is_err());
+}
+
+#[test]
+fn default_checksum_policy_skips_block_mismatch() {
+    let mut fixture = sample();
+    let range = fixture.layout.key_blocks[0].clone();
+    fixture.corrupt_block_checksum(&range);
+    let file = fixture.write("v1-skip-checksum");
+    let dictionary = MdxFile::open(file.path()).expect("checksum-only corruption is skipped");
+
+    assert_eq!(
+        dictionary
+            .key_at(KeyOrdinal::new(0))
+            .unwrap()
+            .unwrap()
+            .key(),
+        "alpha"
+    );
 }
 
 #[test]

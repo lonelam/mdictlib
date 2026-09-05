@@ -211,7 +211,13 @@ impl MdictFile {
         let block_bytes =
             self.source
                 .read_exact_at(block.comp_offset, comp_size, "record block")?;
-        let bytes = decode_block("record block", &block_bytes, decomp_size, &self.limits)?;
+        let bytes = decode_block(
+            "record block",
+            &block_bytes,
+            decomp_size,
+            &self.limits,
+            self.checksum_policy,
+        )?;
         let decoded = Arc::new(DecodedRecordBlock {
             bytes,
             _memory: retained_memory,

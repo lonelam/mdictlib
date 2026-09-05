@@ -360,6 +360,7 @@ where
             scratch_file(options, fallback_scratch)?,
             scratch_write_buffer_bytes(options),
             options.chunk_bytes,
+            options.checksum_policy,
         )?
         .into_section(SectionKind::Order);
     }
@@ -395,6 +396,7 @@ where
                 scratch_file(options, fallback_scratch)?,
                 scratch_write_buffer_bytes(options),
                 options.chunk_bytes,
+                options.checksum_policy,
             )?)
         } else {
             MergeOutput::Runs(BufferedScratchWriter::new(
@@ -505,6 +507,7 @@ where
         scratch_file(options, fallback_scratch)?,
         scratch_write_buffer_bytes(options),
         options.chunk_bytes,
+        options.checksum_policy,
     )?;
     run.reserve_buffer(run_read_buffer_bytes)?;
     let mut reusable = Vec::new();

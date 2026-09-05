@@ -10,7 +10,7 @@ use crate::format::common::source::FileSource;
 use crate::limits::{
     MemoryBudget, checked_u64, checked_usize, ensure_u64_limit, try_reserve_string, try_reserve_vec,
 };
-use crate::types::{ContainerKind, Header, Limits};
+use crate::types::{ChecksumPolicy, ContainerKind, Header, Limits};
 
 #[derive(Debug, Clone)]
 pub struct HeaderSection {
@@ -26,6 +26,7 @@ pub fn parse_header(
     source: &FileSource,
     kind: ContainerKind,
     limits: &Limits,
+    checksum_policy: ChecksumPolicy,
     memory: &Arc<MemoryBudget>,
 ) -> Result<HeaderSection> {
     let _length_memory = memory.reserve(4, "header length read")?;
@@ -46,7 +47,7 @@ pub fn parse_header(
     let total_len = checked_usize(total_len, "header section length")?;
     let _read_memory = memory.reserve(total_len, "header section read")?;
     let bytes = source.read_exact_at(0, total_len, "header section")?;
-    parse_header_bytes_with_limits(&bytes, kind, limits, memory)
+    parse_header_bytes_with_limits(&bytes, kind, limits, checksum_policy, memory)
 }
 
 /// Parses the top-level MDict header from raw file bytes.
@@ -57,13 +58,14 @@ pub fn parse_header(
 pub fn parse_header_bytes(bytes: &[u8], kind: ContainerKind) -> Result<HeaderSection> {
     let limits = Limits::new();
     let memory = Arc::new(MemoryBudget::new(limits.working_memory_bytes));
-    parse_header_bytes_with_limits(bytes, kind, &limits, &memory)
+    parse_header_bytes_with_limits(bytes, kind, &limits, ChecksumPolicy::Verify, &memory)
 }
 
 fn parse_header_bytes_with_limits(
     bytes: &[u8],
     kind: ContainerKind,
     limits: &Limits,
+    checksum_policy: ChecksumPolicy,
     memory: &Arc<MemoryBudget>,
 ) -> Result<HeaderSection> {
     let mut cursor = Cursor::new(bytes);
@@ -80,7 +82,9 @@ fn parse_header_bytes_with_limits(
 
     let xml_bytes = cursor.read_bytes(xml_len, "header xml")?;
     let expected = cursor.read_u32_le("header checksum")?;
-    verify_adler32("header xml", xml_bytes, expected)?;
+    if checksum_policy == ChecksumPolicy::Verify {
+        verify_adler32("header xml", xml_bytes, expected)?;
+    }
 
     let decoded_xml = TextEncoding::Utf16Le.decode(xml_bytes, "header xml")?;
     let raw_xml = clone_header_text(decoded_xml.trim_matches('\0').trim(), "header XML")?;

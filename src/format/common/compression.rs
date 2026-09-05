@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use crate::format::common::checksum::verify_adler32;
 use crate::limits::{ensure_usize_limit, try_reserve_vec};
-use crate::types::Limits;
+use crate::types::{ChecksumPolicy, Limits};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompressionType {
@@ -15,6 +15,7 @@ pub fn decode_block(
     block: &[u8],
     expected_decompressed_len: usize,
     limits: &Limits,
+    checksum_policy: ChecksumPolicy,
 ) -> Result<Vec<u8>> {
     if block.len() < 8 {
         return Err(Error::truncated(context, 8, block.len()));
@@ -38,7 +39,9 @@ pub fn decode_block(
         CompressionType::None => {
             decode_uncompressed_block(context, payload, expected_decompressed_len)?
         }
-        CompressionType::Zlib => decode_zlib_block(context, payload, expected_decompressed_len)?,
+        CompressionType::Zlib => {
+            decode_zlib_block(context, payload, expected_decompressed_len, checksum_policy)?
+        }
         CompressionType::Lzo => decode_lzo_block(context, payload, expected_decompressed_len)?,
     };
 
@@ -49,7 +52,9 @@ pub fn decode_block(
         )));
     }
 
-    verify_adler32(context, &decoded, checksum)?;
+    if checksum_policy == ChecksumPolicy::Verify {
+        verify_adler32(context, &decoded, checksum)?;
+    }
     Ok(decoded)
 }
 
@@ -74,6 +79,7 @@ fn decode_zlib_block(
     context: &'static str,
     payload: &[u8],
     expected_decompressed_len: usize,
+    checksum_policy: ChecksumPolicy,
 ) -> Result<Vec<u8>> {
     let mut output = Vec::new();
     try_reserve_vec(&mut output, expected_decompressed_len, context)?;
@@ -81,6 +87,11 @@ fn decode_zlib_block(
     let mut decompressor = miniz_oxide::inflate::core::DecompressorOxide::new();
     let flags = miniz_oxide::inflate::core::inflate_flags::TINFL_FLAG_PARSE_ZLIB_HEADER
         | miniz_oxide::inflate::core::inflate_flags::TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF;
+    let flags = if checksum_policy == ChecksumPolicy::Skip {
+        flags | miniz_oxide::inflate::core::inflate_flags::TINFL_FLAG_IGNORE_ADLER32
+    } else {
+        flags
+    };
     let (status, input_read, actual) =
         miniz_oxide::inflate::core::decompress(&mut decompressor, payload, &mut output, 0, flags);
     if status != miniz_oxide::inflate::TINFLStatus::Done {
@@ -160,14 +171,28 @@ mod tests {
     #[test]
     fn round_trips_zlib_block() {
         let block = encode_zlib_block(b"hello mdict");
-        let decoded = decode_block("test block", &block, 11, &Limits::new()).unwrap();
+        let decoded = decode_block(
+            "test block",
+            &block,
+            11,
+            &Limits::new(),
+            ChecksumPolicy::Verify,
+        )
+        .unwrap();
         assert_eq!(decoded, b"hello mdict");
     }
 
     #[test]
     fn rejects_unknown_compression_tag() {
         let block = [9, 0, 0, 0, 0, 0, 0, 0];
-        let error = decode_block("test block", &block, 0, &Limits::new()).unwrap_err();
+        let error = decode_block(
+            "test block",
+            &block,
+            0,
+            &Limits::new(),
+            ChecksumPolicy::Verify,
+        )
+        .unwrap_err();
         assert!(matches!(error, Error::InvalidData(_)));
     }
 
@@ -178,7 +203,13 @@ mod tests {
             let mut mutated = block.clone();
             mutated[index] ^= 0x5a;
             let result = std::panic::catch_unwind(|| {
-                let _ = decode_block("mutated zlib block", &mutated, 11, &Limits::new());
+                let _ = decode_block(
+                    "mutated zlib block",
+                    &mutated,
+                    11,
+                    &Limits::new(),
+                    ChecksumPolicy::Verify,
+                );
             });
             assert!(result.is_ok(), "decode_block panicked at byte {index}");
         }
@@ -187,7 +218,14 @@ mod tests {
     #[test]
     fn rejects_zlib_output_larger_than_the_declared_length() {
         let block = encode_zlib_block(&vec![b'x'; 16 * 1024]);
-        let error = decode_block("bounded zlib block", &block, 16, &Limits::new()).unwrap_err();
+        let error = decode_block(
+            "bounded zlib block",
+            &block,
+            16,
+            &Limits::new(),
+            ChecksumPolicy::Verify,
+        )
+        .unwrap_err();
         assert!(matches!(error, Error::InvalidData(_)));
     }
 
@@ -195,8 +233,41 @@ mod tests {
     fn rejects_trailing_bytes_after_a_complete_zlib_stream() {
         let mut block = encode_zlib_block(b"hello mdict");
         block.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
-        let error = decode_block("trailing zlib block", &block, 11, &Limits::new()).unwrap_err();
+        let error = decode_block(
+            "trailing zlib block",
+            &block,
+            11,
+            &Limits::new(),
+            ChecksumPolicy::Verify,
+        )
+        .unwrap_err();
         assert!(matches!(error, Error::InvalidData(_)));
+    }
+
+    #[test]
+    fn skip_policy_ignores_zlib_inner_checksum_but_verify_rejects_it() {
+        let mut block = encode_zlib_block(b"hello mdict");
+        let last = block.len() - 1;
+        block[last] ^= 0x01;
+
+        let skipped = decode_block(
+            "zlib checksum skip",
+            &block,
+            11,
+            &Limits::new(),
+            ChecksumPolicy::Skip,
+        )
+        .unwrap();
+        assert_eq!(skipped, b"hello mdict");
+
+        let verified = decode_block(
+            "zlib checksum verify",
+            &block,
+            11,
+            &Limits::new(),
+            ChecksumPolicy::Verify,
+        );
+        assert!(matches!(verified, Err(Error::InvalidData(_))));
     }
 
     #[cfg(feature = "lzo")]
@@ -214,7 +285,14 @@ mod tests {
         block.extend_from_slice(&payload);
 
         assert_eq!(
-            decode_block("matched lzo block", &block, decoded.len(), &Limits::new()).unwrap(),
+            decode_block(
+                "matched lzo block",
+                &block,
+                decoded.len(),
+                &Limits::new(),
+                ChecksumPolicy::Verify,
+            )
+            .unwrap(),
             decoded
         );
     }

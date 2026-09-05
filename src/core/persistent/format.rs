@@ -19,6 +19,7 @@ use crate::index::{
 use crate::limits::{
     MemoryBudget, checked_usize, ensure_u64_ceiling, ensure_usize_limit, try_reserve_vec,
 };
+use crate::types::ChecksumPolicy;
 
 pub(super) fn build_header(
     sections: &[SectionFile; SECTION_COUNT],
@@ -119,7 +120,11 @@ pub(super) fn build_header(
     }
     let checksum_at = HEADER_BYTES - HEADER_CHECKSUM_BYTES;
     header.resize(checksum_at, 0);
-    let checksum = adler32(&header);
+    let checksum = if options.checksum_policy == ChecksumPolicy::Verify {
+        adler32(&header)
+    } else {
+        0
+    };
     push_u32(&mut header, checksum);
     if header.len() != HEADER_BYTES {
         return Err(Error::InvalidFormat("key-index header length mismatch"));
@@ -131,6 +136,7 @@ pub(crate) fn read_index_header(
     source: &IndexSource,
     memory: &Arc<MemoryBudget>,
     options: &KeyIndexOptions,
+    checksum_policy: ChecksumPolicy,
 ) -> Result<IndexHeader> {
     if source.len < u64::try_from(HEADER_PREFIX_BYTES).unwrap_or(u64::MAX) {
         return Err(reject(KeyIndexRejection::InvalidLayout(
@@ -173,14 +179,16 @@ pub(crate) fn read_index_header(
     let header_bytes = source.read_exact(0, header_len_usize)?;
     let checksum_at = header_len_usize - HEADER_CHECKSUM_BYTES;
     let expected = read_u32_slice(&header_bytes, checksum_at)?;
-    let actual = adler32(&header_bytes[..checksum_at]);
-    if expected != actual {
-        return Err(reject(KeyIndexRejection::ChecksumMismatch {
-            section: "header",
-            chunk: None,
-            expected,
-            actual,
-        }));
+    if checksum_policy == ChecksumPolicy::Verify {
+        let actual = adler32(&header_bytes[..checksum_at]);
+        if expected != actual {
+            return Err(reject(KeyIndexRejection::ChecksumMismatch {
+                section: "header",
+                chunk: None,
+                expected,
+                actual,
+            }));
+        }
     }
     parse_header(&header_bytes, source.len, options)
 }

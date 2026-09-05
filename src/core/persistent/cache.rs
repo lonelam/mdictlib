@@ -15,6 +15,7 @@ use crate::limits::{
     MemoryBudget, MemoryReservation, checked_usize, ensure_u64_ceiling, ensure_usize_limit,
     try_reserve_vec,
 };
+use crate::types::ChecksumPolicy;
 use std::path::Path;
 
 pub(crate) struct IndexSource {
@@ -160,6 +161,7 @@ pub(crate) struct PersistentKeyIndex {
     memory: Arc<MemoryBudget>,
     _cache_memory: MemoryReservation,
     max_row_bytes: usize,
+    checksum_policy: ChecksumPolicy,
 }
 
 impl std::fmt::Debug for PersistentKeyIndex {
@@ -200,7 +202,12 @@ impl PersistentKeyIndex {
         super::format::validate_options(options)?;
         let source = IndexSource::new(file)?;
         ensure_u64_ceiling("key_index_bytes", source.len, options.max_index_bytes)?;
-        let header = read_index_header(&source, &dictionary.memory, options)?;
+        let header = read_index_header(
+            &source,
+            &dictionary.memory,
+            options,
+            options.checksum_policy,
+        )?;
         if &header.source_identity != expected {
             return Err(reject(KeyIndexRejection::SourceIdentityMismatch));
         }
@@ -222,7 +229,11 @@ impl PersistentKeyIndex {
             .checked_mul(4)
             .ok_or(Error::InvalidFormat("persistent checksum table overflow"))?;
         let checksum_cache_bytes = checked_usize(
-            checksum_table_bytes.min(u64::try_from(CHECKSUM_PAGE_BYTES).unwrap_or(u64::MAX)),
+            if options.checksum_policy == ChecksumPolicy::Verify {
+                checksum_table_bytes.min(u64::try_from(CHECKSUM_PAGE_BYTES).unwrap_or(u64::MAX))
+            } else {
+                0
+            },
             "persistent checksum cache",
         )?;
         let cache_bytes =
@@ -257,6 +268,7 @@ impl PersistentKeyIndex {
             memory: Arc::clone(&dictionary.memory),
             _cache_memory: cache_memory,
             max_row_bytes: dictionary.limits.decompressed_block_bytes,
+            checksum_policy: options.checksum_policy,
         })
     }
 
@@ -280,7 +292,9 @@ impl PersistentKeyIndex {
             .checksum_start
             .checked_add(chunk)
             .ok_or_else(|| reject(KeyIndexRejection::InvalidLayout("checksum index overflow")))?;
-        let expected = self.expected_checksum(checksum_index)?;
+        let expected = (self.checksum_policy == ChecksumPolicy::Verify)
+            .then(|| self.expected_checksum(checksum_index))
+            .transpose()?;
 
         let chunk_bytes = u64::from(self.header.chunk_bytes);
         let relative = chunk
@@ -307,15 +321,17 @@ impl PersistentKeyIndex {
         slot.number = None;
         slot.bytes.resize(len, 0);
         self.source.read_exact_into(offset, &mut slot.bytes)?;
-        let actual = adler32(&slot.bytes);
-        if expected != actual {
-            slot.bytes.clear();
-            return Err(reject(KeyIndexRejection::ChecksumMismatch {
-                section: section.name(),
-                chunk: Some(chunk),
-                expected,
-                actual,
-            }));
+        if let Some(expected) = expected {
+            let actual = adler32(&slot.bytes);
+            if expected != actual {
+                slot.bytes.clear();
+                return Err(reject(KeyIndexRejection::ChecksumMismatch {
+                    section: section.name(),
+                    chunk: Some(chunk),
+                    expected,
+                    actual,
+                }));
+            }
         }
         slot.number = Some(chunk);
         Ok(&slot.bytes)

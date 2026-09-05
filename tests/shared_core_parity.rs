@@ -8,7 +8,7 @@
 
 mod support;
 
-use mdictlib::{KeyOrdinal, MddFile, MdxFile};
+use mdictlib::{ChecksumPolicy, KeyOrdinal, MddFile, MdxFile, OpenOptions};
 
 use support::behavior::{ExpectedEntries, assert_mdd_behavior, assert_mdx_behavior};
 use support::v1::{V1BlockCoding, V1FixtureBuilder};
@@ -129,7 +129,9 @@ fn lazy_decoding_is_preserved_for_both_wire_versions() {
     let range = v1.layout.key_blocks[2].clone();
     v1.corrupt_block_checksum(&range);
     let v1_file = v1.write("parity-v1-lazy");
-    let v1_dictionary = MdxFile::open(v1_file.path()).expect("open stays lazy");
+    let options = OpenOptions::new().with_checksum_policy(ChecksumPolicy::Verify);
+    let v1_dictionary =
+        MdxFile::open_with_options(v1_file.path(), &options).expect("open stays lazy");
     assert!(v1_dictionary.key_at(KeyOrdinal::new(0)).unwrap().is_some());
     assert!(v1_dictionary.key_at(KeyOrdinal::new(5)).is_err());
 
@@ -140,7 +142,8 @@ fn lazy_decoding_is_preserved_for_both_wire_versions() {
     let range = v2.layout.key_blocks[2].clone();
     v2.corrupt_block_checksum(&range);
     let v2_file = v2.write("parity-v2-lazy");
-    let v2_dictionary = MdxFile::open(v2_file.path()).expect("open stays lazy");
+    let v2_dictionary =
+        MdxFile::open_with_options(v2_file.path(), &options).expect("open stays lazy");
     assert!(v2_dictionary.key_at(KeyOrdinal::new(0)).unwrap().is_some());
     assert!(v2_dictionary.key_at(KeyOrdinal::new(5)).is_err());
 }

@@ -16,7 +16,7 @@ use crate::core::locator::raw_digest;
 use crate::error::{Error, Result};
 use crate::index::{KeyIndexBuild, KeyIndexOptions, KeyIndexSourceIdentity};
 use crate::limits::try_reserve_vec;
-use crate::types::ContainerKind;
+use crate::types::{ChecksumPolicy, ContainerKind};
 
 pub(crate) fn build_to_writer<W, C>(
     dictionary: &MdictFile,
@@ -163,18 +163,23 @@ pub(crate) struct SectionScratchWriter {
     inner: BufferedScratchWriter,
     chunk_bytes: usize,
     chunk_len: usize,
-    checksum: IncrementalAdler32,
+    checksum: Option<IncrementalAdler32>,
     checksums: Vec<u32>,
     len: u64,
 }
 
 impl SectionScratchWriter {
-    pub(super) fn new(file: File, buffer_bytes: usize, chunk_bytes: usize) -> Result<Self> {
+    pub(super) fn new(
+        file: File,
+        buffer_bytes: usize,
+        chunk_bytes: usize,
+        checksum_policy: ChecksumPolicy,
+    ) -> Result<Self> {
         Ok(Self {
             inner: BufferedScratchWriter::new(file, buffer_bytes)?,
             chunk_bytes,
             chunk_len: 0,
-            checksum: IncrementalAdler32::new(),
+            checksum: (checksum_policy == ChecksumPolicy::Verify).then(IncrementalAdler32::new),
             checksums: Vec::new(),
             len: 0,
         })
@@ -184,9 +189,12 @@ impl SectionScratchWriter {
         self.checksums.try_reserve(1).map_err(|_| {
             std::io::Error::other("could not allocate persistent index checksum table")
         })?;
-        self.checksums.push(self.checksum.finish());
+        self.checksums
+            .push(self.checksum.as_ref().map_or(0, IncrementalAdler32::finish));
         self.chunk_len = 0;
-        self.checksum = IncrementalAdler32::new();
+        if self.checksum.is_some() {
+            self.checksum = Some(IncrementalAdler32::new());
+        }
         Ok(())
     }
 
@@ -218,7 +226,9 @@ impl Write for SectionScratchWriter {
             let count = remaining.min(input.len());
             let bytes = &input[..count];
             self.inner.write_all(bytes)?;
-            self.checksum.update(bytes);
+            if let Some(checksum) = self.checksum.as_mut() {
+                checksum.update(bytes);
+            }
             self.chunk_len += count;
             self.len = self
                 .len
@@ -272,16 +282,19 @@ where
         scratch_file(options, fallback_scratch)?,
         scratch_buffer_bytes,
         options.chunk_bytes,
+        options.checksum_policy,
     )?;
     let mut bounds = SectionScratchWriter::new(
         scratch_file(options, fallback_scratch)?,
         scratch_buffer_bytes,
         options.chunk_bytes,
+        options.checksum_policy,
     )?;
     let mut raw = SectionScratchWriter::new(
         scratch_file(options, fallback_scratch)?,
         scratch_buffer_bytes,
         options.chunk_bytes,
+        options.checksum_policy,
     )?;
     let mut runs = BufferedScratchWriter::new(
         scratch_file(options, fallback_scratch)?,
@@ -471,6 +484,7 @@ where
             scratch_file(options, fallback_scratch)?,
             scratch_buffer_bytes,
             options.chunk_bytes,
+            options.checksum_policy,
         )?;
         write_sorted_order(&mut order, &mut buffer)?;
         drop(buffer);

@@ -8,9 +8,10 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mdictlib::{
-    Error, KEY_INDEX_FORMAT_REVISION, KEY_INDEX_NORMALIZATION_REVISION, KEY_INDEX_PARSER_REVISION,
-    KEY_INDEX_REVISION, KeyIndexOptions, KeyIndexRejection, KeyIndexSourceIdentity, KeyOrdinal,
-    Limits, MatchBasis, MdxFile, OpenOptions as MdictOpenOptions,
+    ChecksumPolicy, Error, KEY_INDEX_FORMAT_REVISION, KEY_INDEX_NORMALIZATION_REVISION,
+    KEY_INDEX_PARSER_REVISION, KEY_INDEX_REVISION, KeyIndexOptions, KeyIndexRejection,
+    KeyIndexSourceIdentity, KeyOrdinal, Limits, MatchBasis, MdxFile,
+    OpenOptions as MdictOpenOptions,
 };
 use support::v1::{V1BlockCoding, V1FixtureBuilder};
 use support::{FixtureBuilder, independent_adler32};
@@ -61,6 +62,7 @@ fn build_index(
 fn assert_index_matches_locator(dictionary: &MdxFile, name: &str) {
     let directory = tempfile::tempdir().unwrap();
     let options = KeyIndexOptions::new()
+        .with_checksum_policy(ChecksumPolicy::Verify)
         .with_build_memory_bytes(512)
         .with_chunk_bytes(64)
         .with_scratch_directory(directory.path());
@@ -169,10 +171,10 @@ fn fnv1a(raw: &str) -> u32 {
 
 #[test]
 fn revision_and_source_identity_are_stable_and_metadata_only() {
-    assert_eq!(KEY_INDEX_FORMAT_REVISION, 2);
+    assert_eq!(KEY_INDEX_FORMAT_REVISION, 3);
     assert_eq!(KEY_INDEX_PARSER_REVISION, 1);
     assert_eq!(KEY_INDEX_NORMALIZATION_REVISION, 1);
-    assert_eq!(KEY_INDEX_REVISION, "f2-p1-n1");
+    assert_eq!(KEY_INDEX_REVISION, "f3-p1-n1");
 
     let fixture = FixtureBuilder::mdx([("alpha", "A"), ("beta", "B")]).build();
     let source = fixture.write("persistent-proof");
@@ -194,7 +196,9 @@ fn empty_dictionary_builds_a_valid_empty_index() {
     let source = fixture.write("persistent-empty");
     let dictionary = MdxFile::open(source.path()).unwrap();
     let directory = tempfile::tempdir().unwrap();
-    let options = KeyIndexOptions::new().with_scratch_directory(directory.path());
+    let options = KeyIndexOptions::new()
+        .with_checksum_policy(ChecksumPolicy::Verify)
+        .with_scratch_directory(directory.path());
     let (path, proof) = build_index(&dictionary, directory.path(), "empty", &options);
     let index = dictionary.open_key_index(path, &proof, &options).unwrap();
     assert!(index.is_empty());
@@ -229,7 +233,7 @@ fn readable_encrypted_sources_build_with_default_options() {
     let dictionary = MdxFile::open(source.path()).unwrap();
     assert_eq!(dictionary.header().encryption_bits(), 2);
 
-    let options = KeyIndexOptions::new();
+    let options = KeyIndexOptions::new().with_checksum_policy(ChecksumPolicy::Verify);
     let mut sink = Cursor::new(Vec::new());
     let report = dictionary
         .build_key_index(&mut sink, &options, || false)
@@ -272,6 +276,7 @@ fn persistent_lookup_preserves_basis_duplicates_prefix_and_physical_scan() {
     let dictionary = MdxFile::open(source.path()).unwrap();
     let directory = tempfile::tempdir().unwrap();
     let options = KeyIndexOptions::new()
+        .with_checksum_policy(ChecksumPolicy::Verify)
         .with_build_memory_bytes(512)
         .with_chunk_bytes(64)
         .with_scratch_directory(directory.path());
@@ -358,6 +363,7 @@ fn checksum_directory_uses_a_bounded_lazy_page_at_open() {
     let source = fixture.write("persistent-checksum-memory");
     let directory = tempfile::tempdir().unwrap();
     let options = KeyIndexOptions::new()
+        .with_checksum_policy(ChecksumPolicy::Verify)
         .with_chunk_bytes(64)
         .with_scratch_directory(directory.path());
     let builder = MdxFile::open(source.path()).unwrap();
@@ -427,7 +433,9 @@ fn a_raw_digest_collision_never_establishes_raw_equality() {
     let source = fixture.write("persistent-digest-collision");
     let dictionary = MdxFile::open(source.path()).unwrap();
     let directory = tempfile::tempdir().unwrap();
-    let options = KeyIndexOptions::new().with_scratch_directory(directory.path());
+    let options = KeyIndexOptions::new()
+        .with_checksum_policy(ChecksumPolicy::Verify)
+        .with_scratch_directory(directory.path());
     let (path, proof) = build_index(&dictionary, directory.path(), "digest-collision", &options);
     let index = dictionary.open_key_index(path, &proof, &options).unwrap();
 
@@ -445,7 +453,9 @@ fn incompatible_revision_and_expected_identity_are_structured_rejections() {
     let source = fixture.write("persistent-rejection");
     let dictionary = MdxFile::open(source.path()).unwrap();
     let directory = tempfile::tempdir().unwrap();
-    let options = KeyIndexOptions::new().with_scratch_directory(directory.path());
+    let options = KeyIndexOptions::new()
+        .with_checksum_policy(ChecksumPolicy::Verify)
+        .with_scratch_directory(directory.path());
     let (path, proof) = build_index(
         &dictionary,
         directory.path(),
@@ -495,7 +505,9 @@ fn source_length_change_rejects_an_otherwise_valid_index_at_open() {
     let source = fixture.write("persistent-source-length-rejection");
     let dictionary = MdxFile::open(source.path()).unwrap();
     let directory = tempfile::tempdir().unwrap();
-    let options = KeyIndexOptions::new().with_scratch_directory(directory.path());
+    let options = KeyIndexOptions::new()
+        .with_checksum_policy(ChecksumPolicy::Verify)
+        .with_scratch_directory(directory.path());
     let (path, identity) = build_index(
         &dictionary,
         directory.path(),
@@ -523,7 +535,9 @@ fn hostile_section_geometry_is_a_structured_rejection() {
     let source = fixture.write("persistent-hostile-geometry");
     let dictionary = MdxFile::open(source.path()).unwrap();
     let directory = tempfile::tempdir().unwrap();
-    let options = KeyIndexOptions::new().with_scratch_directory(directory.path());
+    let options = KeyIndexOptions::new()
+        .with_checksum_policy(ChecksumPolicy::Verify)
+        .with_scratch_directory(directory.path());
     let (path, proof) = build_index(&dictionary, directory.path(), "hostile-geometry", &options);
     let mut bytes = fs::read(&path).unwrap();
     bytes[FIRST_DESCRIPTOR_OFFSET..FIRST_DESCRIPTOR_OFFSET + 8]
@@ -545,6 +559,7 @@ fn section_corruption_is_detected_when_the_chunk_is_first_used() {
     let dictionary = MdxFile::open(source.path()).unwrap();
     let directory = tempfile::tempdir().unwrap();
     let options = KeyIndexOptions::new()
+        .with_checksum_policy(ChecksumPolicy::Verify)
         .with_chunk_bytes(64)
         .with_scratch_directory(directory.path());
     let (path, proof) = build_index(
@@ -579,6 +594,34 @@ fn section_corruption_is_detected_when_the_chunk_is_first_used() {
 }
 
 #[test]
+fn default_persistent_policy_skips_section_checksum_work() {
+    let fixture = FixtureBuilder::mdx([("alpha", "A"), ("beta", "B")]).build();
+    let source = fixture.write("persistent-skip-checksum");
+    let dictionary = MdxFile::open(source.path()).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let options = KeyIndexOptions::new()
+        .with_chunk_bytes(64)
+        .with_scratch_directory(directory.path());
+    assert_eq!(options.checksum_policy(), ChecksumPolicy::Skip);
+    let (path, proof) = build_index(&dictionary, directory.path(), "skip", &options);
+    let index = dictionary.open_key_index(&path, &proof, &options).unwrap();
+    assert!(
+        dictionary
+            .locate_with_key_index(&index, "alpha")
+            .unwrap()
+            .is_some()
+    );
+
+    let verify = options.clone().with_checksum_policy(ChecksumPolicy::Verify);
+    assert!(matches!(
+        dictionary.open_key_index(&path, &proof, &verify),
+        Err(Error::KeyIndexRejected(
+            KeyIndexRejection::ChecksumMismatch { .. }
+        ))
+    ));
+}
+
+#[test]
 fn checksum_valid_out_of_range_ordinal_is_rejected_lazily() {
     const ORDER_SECTION: usize = 3;
 
@@ -587,6 +630,7 @@ fn checksum_valid_out_of_range_ordinal_is_rejected_lazily() {
     let dictionary = MdxFile::open(source.path()).unwrap();
     let directory = tempfile::tempdir().unwrap();
     let options = KeyIndexOptions::new()
+        .with_checksum_policy(ChecksumPolicy::Verify)
         .with_chunk_bytes(64)
         .with_scratch_directory(directory.path());
     let (path, identity) = build_index(
@@ -622,6 +666,7 @@ fn checksum_valid_inverted_and_out_of_range_bounds_are_rejected_lazily() {
     let dictionary = MdxFile::open(source.path()).unwrap();
     let directory = tempfile::tempdir().unwrap();
     let options = KeyIndexOptions::new()
+        .with_checksum_policy(ChecksumPolicy::Verify)
         .with_chunk_bytes(64)
         .with_scratch_directory(directory.path());
     let (path, identity) = build_index(&dictionary, directory.path(), "valid-bounds", &options);
@@ -673,6 +718,7 @@ fn checksum_valid_invalid_utf8_is_rejected_lazily() {
     let dictionary = MdxFile::open(source.path()).unwrap();
     let directory = tempfile::tempdir().unwrap();
     let options = KeyIndexOptions::new()
+        .with_checksum_policy(ChecksumPolicy::Verify)
         .with_chunk_bytes(64)
         .with_scratch_directory(directory.path());
     let (path, identity) = build_index(
@@ -705,6 +751,7 @@ fn cached_reads_remain_stable_and_a_new_open_detects_later_corruption() {
     let dictionary = MdxFile::open(source.path()).unwrap();
     let directory = tempfile::tempdir().unwrap();
     let options = KeyIndexOptions::new()
+        .with_checksum_policy(ChecksumPolicy::Verify)
         .with_chunk_bytes(64)
         .with_scratch_directory(directory.path());
     let (path, proof) = build_index(&dictionary, directory.path(), "later-corruption", &options);
@@ -754,7 +801,7 @@ fn writer_builds_directly_into_a_seekable_destination() {
     let fixture = FixtureBuilder::mdx([("alpha", "A"), ("beta", "B")]).build();
     let source = fixture.write("persistent-build-digest");
     let dictionary = MdxFile::open(source.path()).unwrap();
-    let options = KeyIndexOptions::new();
+    let options = KeyIndexOptions::new().with_checksum_policy(ChecksumPolicy::Verify);
     // This destination deliberately has no `Read` implementation. A successful
     // build therefore proves the final sidecar is never read back.
     let mut sink = WriteSeekOnly(Cursor::new(Vec::new()));
@@ -778,6 +825,7 @@ fn checksum_metadata_ceiling_rejects_before_creating_the_destination() {
     // checksum slot for the non-empty normalized-text section.
     let metadata_limit = HEADER_BYTES + 3 * size_of::<u32>();
     let options = KeyIndexOptions::new()
+        .with_checksum_policy(ChecksumPolicy::Verify)
         .with_max_metadata_bytes(metadata_limit)
         .with_chunk_bytes(64)
         .with_scratch_directory(directory.path());
@@ -804,6 +852,7 @@ fn pathological_duplicate_matches_obey_the_locator_byte_ceiling() {
     let dictionary = MdxFile::open_with_options(source.path(), &open_options).unwrap();
     let directory = tempfile::tempdir().unwrap();
     let options = KeyIndexOptions::new()
+        .with_checksum_policy(ChecksumPolicy::Verify)
         .with_chunk_bytes(64)
         .with_scratch_directory(directory.path());
     let (path, proof) = build_index(
@@ -865,7 +914,9 @@ fn persistent_scan_rejects_same_layout_source_key_mutation() {
     let source = fixture.write("persistent-scan-source-mutation");
     let dictionary = MdxFile::open(source.path()).unwrap();
     let directory = tempfile::tempdir().unwrap();
-    let options = KeyIndexOptions::new().with_scratch_directory(directory.path());
+    let options = KeyIndexOptions::new()
+        .with_checksum_policy(ChecksumPolicy::Verify)
+        .with_scratch_directory(directory.path());
     let (path, proof) = build_index(
         &dictionary,
         directory.path(),
@@ -913,7 +964,9 @@ fn truncation_and_source_rewrite_do_not_make_the_dictionary_unreadable() {
     let source = fixture.write("persistent-stale-source");
     let dictionary = MdxFile::open(source.path()).unwrap();
     let directory = tempfile::tempdir().unwrap();
-    let options = KeyIndexOptions::new().with_scratch_directory(directory.path());
+    let options = KeyIndexOptions::new()
+        .with_checksum_policy(ChecksumPolicy::Verify)
+        .with_scratch_directory(directory.path());
     let (path, proof) = build_index(&dictionary, directory.path(), "stale-source", &options);
 
     let original_len = fs::metadata(&path).unwrap().len();
@@ -961,7 +1014,7 @@ fn build_detects_source_mutation_and_honors_cancellation() {
     let fixture = FixtureBuilder::mdx([("alpha", "A"), ("beta", "B")]).build();
     let source = fixture.write("persistent-build-mutation");
     let dictionary = MdxFile::open(source.path()).unwrap();
-    let options = KeyIndexOptions::new();
+    let options = KeyIndexOptions::new().with_checksum_policy(ChecksumPolicy::Verify);
     let mut sink = Cursor::new(Vec::new());
     assert!(matches!(
         dictionary.build_key_index(&mut sink, &options, || true),
