@@ -4,7 +4,59 @@ All notable changes are recorded here.
 
 ## [Unreleased]
 
-No changes yet.
+### Added
+
+- `KeyMatchPage`, `MdxFile::locate_page`, `MddFile::locate_page`, and
+  `MdxFile::locate_page_with_key_index`. These additive APIs preserve global
+  raw-exact precedence, exact totals, duplicates, and physical order while
+  retaining only the requested ordinal window.
+- A production persistent MDX key-index API: stable format/parser/normalization
+  revision constants, lightweight source metadata identity, bounded and
+  cancellable construction to a caller-provided seekable sink or create-new
+  path, fixed-cost open, and indexed exact/prefix/physical traversal.
+- A file-backed index format with checked 64-bit aligned sections, physical
+  normalized text and bounds, normalized-order ordinals, raw-digest filters,
+  a checksummed fixed header, lazily paged checksum metadata, and independently
+  verified lazy section chunks. Construction uses external merge runs and does
+  not instantiate the existing process-lifetime locator.
+- Structured `KeyIndexRejection`, cancellation, and observed source-change
+  errors. Corrupt, stale, oversized, truncated, or incompatible sidecars remain
+  isolated from the readable MDX source.
+
+### Performance
+
+- Persistent-index construction now buffers section/run writes, bypasses
+  scratch-run serialization for a one-batch sort, appends normalized keys to a
+  shared arena, uses bounded per-run read buffers and allocation reuse during
+  external merge, and writes the final merge directly to the ordinal section.
+- Construction no longer performs full-source hashing, rereads the completed
+  sidecar, or rescans every source row. Final destinations require only
+  `Write + Seek`; open reads a fixed 248 bytes before lazy use.
+
+### Security
+
+- Persistent indexes are plaintext normalized-headword derivatives. Every
+  readable encrypted MDX follows the ordinary index path without a policy
+  option; hosts own storage and lifecycle policy.
+- Raw-key digests remain candidate filters only. A positive exact result is
+  always rechecked against the current source key block, including collisions.
+- Persistent normalized scans verify each visited source key's normalized
+  text and raw digest before exposing index text, rejecting same-layout source
+  mutation as `SourceKeyMismatch`.
+- Lazy reads interpret the exact chunk bytes whose checksums were verified,
+  rather than caching a verification flag across a later mutable reread.
+  Fixed header bytes, one bounded checksum page, runtime chunk/read buffers,
+  and persistent match ordinals are aggregate-memory accounted; pathological
+  equal ranges are capped by `Limits::locator_bytes`.
+- Source length and modification time are a local freshness stamp, not content
+  authentication or cross-path deduplication. Unkeyed checksums detect ordinary
+  corruption only; hosts namespace rebuildable caches by stable source location
+  plus `KEY_INDEX_REVISION`.
+
+### Package
+
+- Bumped the package candidate from `0.2.3` to `0.2.4` for the compatible
+  additive API. Publishing, tagging, and pushing remain maintainer actions.
 
 ## [0.2.3] - 2026-08-13
 

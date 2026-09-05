@@ -7,7 +7,7 @@
 //! Every 32-bit field is widened at the read site, so no `u32` participates in
 //! section arithmetic. This module may not reference the core, the MDX/MDD
 //! facades, or [`crate::format::v2`]. Its only output is a
-//! [`ValidatedLayout`](crate::format::common::descriptors::ValidatedLayout).
+//! [`ValidatedLayout`].
 //!
 //! # Scope
 //!

@@ -2,13 +2,14 @@ mod iter;
 mod keys;
 mod locator;
 mod normalize;
+pub(crate) mod persistent;
 mod records;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
 pub(crate) use iter::{KeyIter, RecordIter};
-pub(crate) use locator::{LocatedKeys, LocatorBasis};
+pub(crate) use locator::{LocatedKeyPage, LocatedKeys, LocatorBasis};
 pub(crate) use records::RecordDescriptor;
 
 use crate::error::{Error, Result};
@@ -64,7 +65,11 @@ enum CachedFailureKind {
 impl CachedFailure {
     pub(super) fn capture(error: &Error, memory: &Arc<MemoryBudget>) -> Option<Self> {
         let (kind, reservation) = match error {
-            Error::Io(_) | Error::AllocationFailed { .. } => return None,
+            Error::Io(_)
+            | Error::AllocationFailed { .. }
+            | Error::KeyIndexRejected(_)
+            | Error::Cancelled { .. }
+            | Error::SourceChanged { .. } => return None,
             Error::LimitExceeded {
                 limit: "working_memory_bytes",
                 ..
@@ -163,12 +168,6 @@ impl CachedFailure {
 }
 
 /// One open dictionary, shared by MDX and MDD and by every wire version.
-///
-/// The core is deliberately version-blind: it holds a
-/// [`ValidatedLayout`] whose geometry has already been widened, range-checked,
-/// and limit-checked by whichever grammar produced it, plus the statically
-/// selected wire operations it calls on a lazy cache miss. Nothing here can
-/// observe or branch on the file's declared version.
 pub(crate) struct MdictFile {
     kind: ContainerKind,
     source: Arc<FileSource>,

@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::{Error, Result};
 use crate::limits::{checked_u64, try_reserve_vec};
@@ -10,6 +11,12 @@ pub struct FileSource {
     path: PathBuf,
     file: Mutex<File>,
     len: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FileIdentity {
+    pub(crate) len: u64,
+    pub(crate) modified_unix_nanos: i128,
 }
 
 impl std::fmt::Debug for FileSource {
@@ -52,6 +59,22 @@ impl FileSource {
         Ok(output)
     }
 
+    pub const fn len(&self) -> u64 {
+        self.len
+    }
+
+    pub(crate) fn current_identity(&self) -> Result<FileIdentity> {
+        let file = self
+            .file
+            .lock()
+            .map_err(|_| Error::InvalidFormat("source mutex poisoned"))?;
+        let metadata = file.metadata()?;
+        Ok(FileIdentity {
+            len: metadata.len(),
+            modified_unix_nanos: system_time_unix_nanos(metadata.modified()?)?,
+        })
+    }
+
     pub fn ensure_range(&self, offset: u64, len: u64, context: &'static str) -> Result<()> {
         let end = offset
             .checked_add(len)
@@ -62,5 +85,18 @@ impl FileSource {
             return Err(Error::truncated(context, needed, remaining));
         }
         Ok(())
+    }
+}
+
+fn system_time_unix_nanos(time: SystemTime) -> Result<i128> {
+    match time.duration_since(UNIX_EPOCH) {
+        Ok(duration) => i128::try_from(duration.as_nanos()).map_err(|_| {
+            Error::InvalidData("source modification time exceeds i128 nanoseconds".to_owned())
+        }),
+        Err(error) => i128::try_from(error.duration().as_nanos())
+            .map(|nanos| -nanos)
+            .map_err(|_| {
+                Error::InvalidData("source modification time exceeds i128 nanoseconds".to_owned())
+            }),
     }
 }

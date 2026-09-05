@@ -59,6 +59,43 @@ fn locate_preserves_all_raw_duplicates_in_physical_order_across_many_blocks() {
 }
 
 #[test]
+fn locate_page_preserves_global_raw_precedence_total_and_order() {
+    let fixture = FixtureBuilder::mdx([
+        ("PAGE!", "normalized zero"),
+        ("page", "raw one"),
+        ("Page?", "normalized two"),
+        ("page", "raw three"),
+        ("page", "raw four"),
+    ])
+    .strip_key_attribute("StripKey", "Yes")
+    .key_blocks([1, 2, 2])
+    .build();
+    let dictionary_file = fixture.write("paged-raw-precedence");
+    let dictionary = MdxFile::open(dictionary_file.path()).unwrap();
+
+    let first = dictionary.locate_page("page", 0, 2).unwrap().unwrap();
+    assert_eq!(first.basis(), MatchBasis::RawExact);
+    assert_eq!(first.total(), 3);
+    assert_eq!(
+        first.iter().map(KeyOrdinal::get).collect::<Vec<_>>(),
+        [1, 3]
+    );
+
+    let second = dictionary.locate_page("page", 2, 2).unwrap().unwrap();
+    assert_eq!(second.basis(), MatchBasis::RawExact);
+    assert_eq!(second.total(), 3);
+    assert_eq!(second.iter().map(KeyOrdinal::get).collect::<Vec<_>>(), [4]);
+
+    let normalized = dictionary.locate_page("PAGE", 1, 2).unwrap().unwrap();
+    assert_eq!(normalized.basis(), MatchBasis::HeaderNormalized);
+    assert_eq!(normalized.total(), 5);
+    assert_eq!(
+        normalized.iter().map(KeyOrdinal::get).collect::<Vec<_>>(),
+        [1, 2]
+    );
+}
+
+#[test]
 fn raw_exact_duplicate_range_excludes_normalized_only_collisions() {
     let fixture = FixtureBuilder::mdx([
         ("TARGET", "normalized zero"),

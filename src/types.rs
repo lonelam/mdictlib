@@ -484,7 +484,8 @@ impl Limits {
         self
     }
 
-    /// Sets the maximum estimated retained size of the lookup locator.
+    /// Sets the maximum estimated retained size of the lookup locator and the
+    /// maximum ordinal bytes materialized for one persistent-index match set.
     #[must_use]
     pub const fn with_locator_bytes(mut self, value: usize) -> Self {
         self.locator_bytes = value;

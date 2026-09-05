@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::core::{LocatedKeys, LocatorBasis};
+use crate::core::{LocatedKeyPage, LocatedKeys, LocatorBasis};
 use crate::types::KeyOrdinal;
 
 /// Describes why a key query matched physical dictionary entries.
@@ -20,6 +20,59 @@ pub enum MatchBasis {
 #[derive(Clone)]
 pub struct KeyMatches {
     inner: LocatedKeys,
+}
+
+/// A bounded, duplicate-preserving window of physical key matches.
+///
+/// The page may be empty when `offset` is at or beyond [`Self::total`]. Its
+/// basis and total still describe the complete match set. Ordinals retain
+/// ascending physical order, and the allocation retained by this value is
+/// proportional to [`Self::len`], not [`Self::total`].
+pub struct KeyMatchPage {
+    inner: LocatedKeyPage,
+}
+
+impl KeyMatchPage {
+    pub(crate) fn from_located(inner: LocatedKeyPage) -> Self {
+        Self { inner }
+    }
+
+    /// Returns whether the complete query matched raw or normalized text.
+    pub const fn basis(&self) -> MatchBasis {
+        match self.inner.basis() {
+            LocatorBasis::RawExact => MatchBasis::RawExact,
+            LocatorBasis::HeaderNormalized => MatchBasis::HeaderNormalized,
+        }
+    }
+
+    /// Returns the number of physical entries in the complete match set.
+    pub const fn total(&self) -> usize {
+        self.inner.total()
+    }
+
+    /// Returns the number of ordinals materialized in this page.
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Returns whether this page contains no materialized ordinals.
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Returns one page ordinal by position in ascending physical order.
+    pub fn get(&self, index: usize) -> Option<KeyOrdinal> {
+        self.inner.ordinal_at(index)
+    }
+
+    /// Iterates over this page's ordinals in ascending physical order.
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = KeyOrdinal> + '_ {
+        (0..self.len()).map(|index| {
+            self.inner
+                .ordinal_at(index)
+                .expect("iterator indices stay inside the key match page")
+        })
+    }
 }
 
 impl KeyMatches {
@@ -80,9 +133,28 @@ impl fmt::Debug for KeyMatches {
     }
 }
 
+impl fmt::Debug for KeyMatchPage {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("KeyMatchPage")
+            .field("basis", &self.basis())
+            .field("total", &self.total())
+            .field("ordinals", &DebugPageOrdinals(self))
+            .finish()
+    }
+}
+
 struct DebugOrdinals<'a>(&'a KeyMatches);
 
+struct DebugPageOrdinals<'a>(&'a KeyMatchPage);
+
 impl fmt::Debug for DebugOrdinals<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.debug_list().entries(self.0.iter()).finish()
+    }
+}
+
+impl fmt::Debug for DebugPageOrdinals<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.debug_list().entries(self.0.iter()).finish()
     }

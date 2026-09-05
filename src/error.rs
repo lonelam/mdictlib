@@ -1,9 +1,12 @@
 use std::fmt;
 
+use crate::index::KeyIndexRejection;
+
 /// Result type returned by `mdictlib` operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// An error reported while configuring, opening, or reading an MDict file.
+/// An error reported while configuring, opening, or reading an MDict file or
+/// its caller-managed persistent key index.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
@@ -60,6 +63,18 @@ pub enum Error {
     InvalidPasscode(&'static str),
     /// The file requests a format feature that this build does not support.
     Unsupported(&'static str),
+    /// A persistent key index was rejected before or while it was used.
+    KeyIndexRejected(KeyIndexRejection),
+    /// A caller-cancellable operation was cancelled at a checkpoint.
+    Cancelled {
+        /// Stable name of the cancelled operation.
+        operation: &'static str,
+    },
+    /// Source bytes changed while an operation that requires a stable source ran.
+    SourceChanged {
+        /// Stable name of the operation that observed the change.
+        operation: &'static str,
+    },
 }
 
 impl Error {
@@ -106,6 +121,11 @@ impl fmt::Display for Error {
             Self::MissingPasscode => write!(f, "dictionary requires a passcode"),
             Self::InvalidPasscode(context) => write!(f, "invalid passcode: {context}"),
             Self::Unsupported(feature) => write!(f, "unsupported feature: {feature}"),
+            Self::KeyIndexRejected(reason) => write!(f, "key index rejected: {reason}"),
+            Self::Cancelled { operation } => write!(f, "{operation} was cancelled"),
+            Self::SourceChanged { operation } => {
+                write!(f, "source changed while {operation} was running")
+            }
         }
     }
 }
@@ -114,6 +134,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(error) => Some(error),
+            Self::KeyIndexRejected(reason) => Some(reason),
             _ => None,
         }
     }

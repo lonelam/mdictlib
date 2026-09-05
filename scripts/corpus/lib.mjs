@@ -194,7 +194,10 @@ export async function writeTextAtomic(outputPath, text) {
       directoryHandle = await open(outputDirectory, constants.O_RDONLY);
       await directoryHandle.sync();
     } catch (error) {
-      if (!["EINVAL", "ENOTSUP", "EBADF", "EISDIR"].includes(error?.code)) throw error;
+      const directorySyncUnsupported =
+        ["EINVAL", "ENOTSUP", "EBADF", "EISDIR"].includes(error?.code) ||
+        (process.platform === "win32" && error?.code === "EPERM");
+      if (!directorySyncUnsupported) throw error;
     } finally {
       await directoryHandle?.close();
     }

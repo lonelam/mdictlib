@@ -243,6 +243,7 @@ export async function main(argv = process.argv.slice(2), internal = {}) {
     fail("usage: lock-corpus.mjs --selection <reviewed-selection.json> --inventory <source.inventory.json> --output <catalog.lock.draft.json> [options]");
   }
   const networkPolicy = internal.networkPolicy ?? {};
+  const spawnBuildSync = internal.spawnSync ?? spawnSync;
   await assertDistinctPaths({ selection: options.selection, inventory: options.inventory, output: options.output });
   const [selectionIdentityBefore, inventoryIdentityBefore, selection, inventory] = await Promise.all([
     sha256File(options.selection),
@@ -382,7 +383,7 @@ export async function main(argv = process.argv.slice(2), internal = {}) {
   let observer = null;
   if (acquired.length > 0 && !options["skip-observe"]) {
     const cargo = options.cargo ?? "cargo";
-    const build = spawnSync(cargo, ["build", "--locked", "--release", "--all-features", "--example", "inspect"], {
+    const build = spawnBuildSync(cargo, ["build", "--locked", "--release", "--all-features", "--example", "inspect"], {
       cwd: repositoryRoot,
       stdio: "inherit",
       timeout: Math.max(observeTimeoutMs, 10 * 60 * 1000),
