@@ -6,6 +6,12 @@ All notable changes are recorded here.
 
 ### Added
 
+- `ChecksumPolicy::{Skip, Verify}` and `OpenOptions::with_checksum_policy`.
+  `Skip` is the default MDict wire-decoding policy for throughput; it retains
+  structural, size, range, decompression, and complete-stream validation while
+  bypassing optional checksum comparisons. `Verify` restores fail-closed
+  checksum mismatch errors. Persistent key-index checksums remain independent.
+
 - `KeyMatchPage`, `MdxFile::locate_page`, `MddFile::locate_page`, and
   `MdxFile::locate_page_with_key_index`. These additive APIs preserve global
   raw-exact precedence, exact totals, duplicates, and physical order while

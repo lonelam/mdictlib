@@ -245,7 +245,13 @@ impl MdictFile {
         let block_bytes = self
             .source
             .read_exact_at(block.comp_offset, comp_size, "key block")?;
-        let decoded = decode_block("key block", &block_bytes, decomp_size, &self.limits)?;
+        let decoded = decode_block(
+            "key block",
+            &block_bytes,
+            decomp_size,
+            &self.limits,
+            self.checksum_policy,
+        )?;
         let context = KeyRowContext {
             encoding: self.layout.key_encoding,
             expected_entries: block.entry_count,

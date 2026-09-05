@@ -18,7 +18,7 @@ use crate::format::common::descriptors::ValidatedLayout;
 use crate::format::common::source::FileSource;
 use crate::format::open_layout;
 use crate::limits::{MemoryBudget, MemoryReservation, ensure_usize_limit, try_clone_string};
-use crate::types::{ContainerKind, Header, Limits, MemoryUsage, OpenOptions};
+use crate::types::{ChecksumPolicy, ContainerKind, Header, Limits, MemoryUsage, OpenOptions};
 
 use self::keys::DecodedKeyBlock;
 use self::locator::KeyLocator;
@@ -174,6 +174,7 @@ pub(crate) struct MdictFile {
     layout: ValidatedLayout,
     normalizer: KeyNormalizer,
     limits: Limits,
+    checksum_policy: ChecksumPolicy,
     memory: Arc<MemoryBudget>,
     key_block_cache: Mutex<Option<(usize, CachedValue<DecodedKeyBlock>)>>,
     record_block_cache: Mutex<Option<(usize, CachedValue<DecodedRecordBlock>)>>,
@@ -213,6 +214,7 @@ impl MdictFile {
             layout,
             normalizer,
             limits,
+            checksum_policy: options.checksum_policy,
             memory,
             key_block_cache: Mutex::new(None),
             record_block_cache: Mutex::new(None),

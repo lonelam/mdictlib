@@ -1,6 +1,6 @@
 # mdictlib Status
 
-Last updated: 2026-09-04 (v0.2.4 package candidate; v0.2.3 published)
+Last updated: 2026-09-05 (v0.2.4 package candidate; v0.2.3 published)
 
 ## Current Snapshot
 
@@ -232,6 +232,8 @@ version enum in the core, no per-entry branch, and no trait object.
 ### Limits and diagnostics
 
 - `OpenOptions` borrows reusable options and accepts a fully wired `Limits`.
+- `OpenOptions` also exposes `ChecksumPolicy`; `Skip` is the default for MDict
+  wire checksum comparisons, while `Verify` restores mismatch detection.
 - Limits cover header XML/attributes, indexes, block metadata, compressed and
   decoded blocks, per-block key counts, materialized records, locator rows and
   bytes, and aggregate working memory.
@@ -316,8 +318,9 @@ lookbehind matches, not only literal streams.
   LZO output is exactly bounded.
 - Record-index length is exactly `block_count * 16`; trailing data and invalid
   source ranges are rejected.
-- Key-block counts are checked before each push, terminators/checksums are
-  validated, and first/last summaries use creator-compatible normalization.
+- Key-block counts are checked before each push, terminators are validated,
+  checksum comparisons follow `ChecksumPolicy`, and first/last summaries use
+  creator-compatible normalization.
 - The legacy v2 keyword-index fallback retains exact header/index checksums,
   count and size sums, full index consumption, decoded text, and block-boundary
   validation; it is not a general permissive parse mode.
@@ -425,11 +428,16 @@ Checksum hot-path follow-up on 2026-09-05:
 - Common Adler-32 now reduces its accumulators once per 5,552-byte block,
   matching the existing persistent-index streaming implementation. A boundary
   regression compares the optimized result with the bytewise reference.
-- Checksums remain required integrity checks: decoded key/record blocks and
-  persistent-index chunks are checked on first use, while repeated access to a
-  cached block or chunk does not recompute it. The persistent index intentionally
-  retains one verified chunk per section, so random cross-chunk access can still
-  incur another read and checksum; this is the bounded-memory tradeoff.
+- `ChecksumPolicy::Skip` is now the default for MDict header, outer block, and
+  zlib inner checksum comparisons. It does not skip size, range, decompression,
+  complete-stream, or structural checks. `Verify` restores fail-closed checksum
+  mismatch errors. The v2 encrypted keyword-index checksum remains necessary
+  as key material, and the small v2 header checksum remains a layout signal.
+- Persistent-index checksums remain independent of `ChecksumPolicy`: decoded
+  sidecar chunks are checked on first use, while repeated access to a cached
+  chunk does not recompute it. The persistent index intentionally retains one
+  verified chunk per section, so random cross-chunk access can still incur
+  another read and checksum; this is the bounded-memory tradeoff.
 - A standalone 512 MiB release microbenchmark measured the old bytewise Adler
   loop at about 854 ms versus about 95 ms after block reduction (same result,
   roughly 9x faster). This is a checksum microbenchmark, not a full-corpus

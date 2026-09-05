@@ -57,7 +57,13 @@ Implemented in this candidate:
    a raw match, so collisions cannot change lookup semantics. The loader
    reads the checksum directory through one bounded lazy page, so opening cost
    does not grow with artifact size.
-4. Synthetic v1/v2 differential, duplicate, prefix, cancellation, source-change,
+4. MDict source decoding exposes an explicit `ChecksumPolicy` through
+   `OpenOptions`. `Skip` is the default throughput policy and bypasses optional
+   header/block/zlib checksum comparisons while retaining size, range,
+   decompression, complete-stream, and structural checks. `Verify` restores
+   fail-closed checksum mismatch errors. Persistent `.aaidx` checksums remain
+   an independent cache-format integrity mechanism.
+5. Synthetic v1/v2 differential, duplicate, prefix, cancellation, source-change,
    hostile-geometry, truncation, corruption, revision/identity mismatch, digest-
    collision, readable-encrypted-source indexing, fixed-open-byte, and
    greater-than-32-run merge tests are present. The current Windows package
@@ -674,8 +680,11 @@ These rules are absolute and apply to every milestone below.
    keyword-index checksum disambiguation in section 2 is inside one major
    version and is unaffected.)
 7. **No permissive parsing.** No brute-force parsing, no grammar retries, no
-   silent checksum bypasses, no heuristic encoding changes, no lossy fallback.
-   An unresolved artifact stays classified as unresolved.
+   heuristic encoding changes, no lossy fallback. The explicit default
+   `ChecksumPolicy::Skip` only bypasses optional checksum comparisons; it does
+   not bypass geometry, decompression, complete-stream, or structural parsing.
+   `ChecksumPolicy::Verify` retains fail-closed checksum errors. An unresolved
+   artifact stays classified as unresolved.
 8. **Conversion and writer tools stay outside the library.** Any converter or
    writer built during this program is a separately reviewed diagnostic or test
    oracle. It is never linked into the published crate and never called by

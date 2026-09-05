@@ -221,8 +221,8 @@ physical scans source-verify each visited normalized row and raw digest before
 calling the visitor, so an unchanged-layout source-key mutation rejects the
 index instead of returning stale index text.
 
-Normal open validates the expected metadata identity, revisions, fixed-header
-checksum, file length, and checked section geometry. Format revision 2 performs
+Normal open validates the expected metadata identity, revisions, file length,
+and checked section geometry. Format revision 2 performs
 two fixed reads totalling 248 bytes; it does not load the checksum directory or
 any data section. On first use of a section chunk, the corresponding bounded
 checksum page and exact chunk bytes are read. The verified bytes stay in the
@@ -245,6 +245,26 @@ proof against an attacker who can rewrite the sidecar and its checksums. The
 metadata stamp likewise does not defend against timestamp spoofing. Persistent
 indexes are local, rebuildable caches; delete and rebuild one after any
 rejection.
+
+MDict source decoding uses [`ChecksumPolicy`](https://docs.rs/mdictlib/latest/mdictlib/enum.ChecksumPolicy.html).
+The default `ChecksumPolicy::Skip` avoids optional header, block-envelope, and
+zlib checksum comparisons for throughput while retaining size, range,
+decompression, complete-stream, and structural validation. Select
+`ChecksumPolicy::Verify` when checksum mismatch errors are required:
+
+```rust,no_run
+use mdictlib::{ChecksumPolicy, MdxFile, OpenOptions};
+
+fn main() -> mdictlib::Result<()> {
+    let options = OpenOptions::new().with_checksum_policy(ChecksumPolicy::Verify);
+    let dictionary = MdxFile::open_with_options("dictionary.mdx", &options)?;
+    println!("{} entries", dictionary.len());
+    Ok(())
+}
+```
+
+Persistent `.aaidx` checksum validation is an independent cache-format policy
+and remains enabled regardless of this source-decoding setting.
 
 The sidecar contains plaintext normalized headwords. Every readable MDX source,
 including version 2 keyword-index encryption, uses the same ordinary index

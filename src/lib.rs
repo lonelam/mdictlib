@@ -9,6 +9,9 @@
 //! MDX callers may optionally build a bounded, source-bound persistent key
 //! index and reopen it through safe lazy positional reads; artifact placement
 //! and publication remain caller-owned.
+//! MDict wire checksum comparisons are controlled by [`ChecksumPolicy`] and
+//! default to [`ChecksumPolicy::Skip`] for throughput; structural parsing and
+//! decompression validation remain enabled.
 //!
 //! # Wire versions
 //!
@@ -48,4 +51,6 @@ pub use index::{
 pub use lookup::{KeyMatchPage, KeyMatches, MatchBasis};
 pub use mdd::{MddFile, MddResource, MddResourceSpan};
 pub use mdx::{MdxEntry, MdxFile};
-pub use types::{Header, KeyEntry, KeyOrdinal, Limits, MemoryUsage, OpenOptions, Passcode};
+pub use types::{
+    ChecksumPolicy, Header, KeyEntry, KeyOrdinal, Limits, MemoryUsage, OpenOptions, Passcode,
+};

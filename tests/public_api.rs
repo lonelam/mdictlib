@@ -4,10 +4,11 @@ use std::ops::ControlFlow;
 use std::path::Path;
 
 use mdictlib::{
-    Header, KEY_INDEX_FORMAT_REVISION, KEY_INDEX_NORMALIZATION_REVISION, KEY_INDEX_PARSER_REVISION,
-    KEY_INDEX_REVISION, KeyEntry, KeyIndex, KeyIndexBuild, KeyIndexOptions, KeyIndexRejection,
-    KeyIndexSourceIdentity, KeyMatchPage, KeyMatches, KeyOrdinal, Limits, MatchBasis, MddFile,
-    MddResource, MddResourceSpan, MdxEntry, MdxFile, MemoryUsage, OpenOptions, Passcode, Result,
+    ChecksumPolicy, Header, KEY_INDEX_FORMAT_REVISION, KEY_INDEX_NORMALIZATION_REVISION,
+    KEY_INDEX_PARSER_REVISION, KEY_INDEX_REVISION, KeyEntry, KeyIndex, KeyIndexBuild,
+    KeyIndexOptions, KeyIndexRejection, KeyIndexSourceIdentity, KeyMatchPage, KeyMatches,
+    KeyOrdinal, Limits, MatchBasis, MddFile, MddResource, MddResourceSpan, MdxEntry, MdxFile,
+    MemoryUsage, OpenOptions, Passcode, Result,
 };
 
 fn assert_fused_result_iter<T>(_iterator: impl FusedIterator<Item = Result<T>>) {}
@@ -131,6 +132,14 @@ fn value_api_contract() {
     let options = OpenOptions::new()
         .with_passcode(passcode)
         .with_limits(Limits::new());
+    assert_eq!(options.checksum_policy(), ChecksumPolicy::Skip);
+    assert_eq!(
+        options
+            .clone()
+            .with_checksum_policy(ChecksumPolicy::Verify)
+            .checksum_policy(),
+        ChecksumPolicy::Verify
+    );
     let limits = options.limits();
     assert!(limits.working_memory_bytes() >= limits.locator_bytes());
     let large_limits: Limits = Limits::large_dictionary();

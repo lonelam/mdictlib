@@ -21,7 +21,7 @@ use crate::format::common::descriptors::{
 use crate::format::common::encoding::TextEncoding;
 use crate::format::common::source::FileSource;
 use crate::limits::{MemoryBudget, try_reserve_vec};
-use crate::types::{Header, Limits, OpenOptions};
+use crate::types::{ChecksumPolicy, Header, Limits, OpenOptions};
 
 /// The version 2 lazy wire operations, selected once during open.
 pub(super) const WIRE_OPERATIONS: WireOperations = WireOperations { decode_key_rows };
@@ -77,7 +77,8 @@ pub(super) fn parse_keyword_section(
         let passcode = options.passcode.as_ref().ok_or(Error::MissingPasscode)?;
         decrypt_keyword_header_block(&mut raw_header[..40], passcode)?;
     }
-    let layout = detect_keyword_index_layout(&raw_header[..40], checksum_bytes)?;
+    let layout =
+        detect_keyword_index_layout(&raw_header[..40], checksum_bytes, options.checksum_policy)?;
 
     let mut cursor = Cursor::new(&raw_header[..40]);
     let num_blocks = cursor.read_u64_be("keyword num_blocks")?;
@@ -164,6 +165,7 @@ pub(super) fn parse_keyword_section(
         &key_index_bytes,
         key_index_decomp_len,
         &options.limits,
+        options.checksum_policy,
     )?;
 
     let blocks = parse_keyword_index_entries(
@@ -220,6 +222,7 @@ pub(super) fn parse_keyword_section(
 fn detect_keyword_index_layout(
     header: &[u8],
     checksum_bytes: [u8; 4],
+    checksum_policy: ChecksumPolicy,
 ) -> Result<KeywordIndexLayout> {
     let actual = crate::format::common::checksum::adler32(header);
     let canonical_checksum = u32::from_be_bytes(checksum_bytes);
@@ -232,6 +235,9 @@ fn detect_keyword_index_layout(
         return Ok(KeywordIndexLayout::LegacyLittleEndianChecksumWithoutSummaryTerminators);
     }
 
+    if checksum_policy == ChecksumPolicy::Skip {
+        return Ok(KeywordIndexLayout::Canonical);
+    }
     Err(Error::ChecksumMismatch {
         context: "keyword section header",
         expected: canonical_checksum,
@@ -520,7 +526,7 @@ mod tests {
         let checksum_bytes = crate::format::common::checksum::adler32(&header).to_be_bytes();
         assert_eq!(checksum_bytes, [0xe4, 0x15, 0x15, 0xe4]);
         assert_eq!(
-            detect_keyword_index_layout(&header, checksum_bytes).unwrap(),
+            detect_keyword_index_layout(&header, checksum_bytes, ChecksumPolicy::Verify).unwrap(),
             KeywordIndexLayout::Canonical
         );
     }
