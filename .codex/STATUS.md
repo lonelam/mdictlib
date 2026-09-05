@@ -1,19 +1,18 @@
 # mdictlib Status
 
-Last updated: 2026-09-05 (v0.2.5 release candidate; v0.2.4 published)
+Last updated: 2026-09-05 (v0.2.5 published)
 
 ## Current Snapshot
 
-- `mdictlib` `0.2.5` is the current source/package candidate; `0.2.4` is the
-  current crates.io release. The crate supports MDict major versions 1 and
+- `mdictlib` `0.2.5` is the current crates.io release. The crate supports MDict
+  major versions 1 and
   2 for MDX and MDD.
 - Version 1 support is implemented, tested against independent synthetic
   fixtures, fuzzed, and validated against 453 authorized real v1.2 MDX
   artifacts. **407 of 453 complete full validation**; every rejected artifact
   carries a structured retained classification.
 - The compatible persistent MDX key-index facility and explicit checksum policy
-  are implemented in the `0.2.5` candidate. Publishing, tagging, or pushing it
-  still requires explicit maintainer authorization.
+  are implemented and released in `0.2.5`.
 - AALookup integration has started against this adjacent `0.2.5` checkout: its
   normal build now compiles the persistent-index API by default, without a
   Cargo feature or build-script environment `cfg` gate. This local path is an
@@ -22,8 +21,8 @@ Last updated: 2026-09-05 (v0.2.5 release candidate; v0.2.4 published)
   ignored cache and all 16 passed full validation, 14 of them declaring
   version 1.2.
 - The canonical repository is `https://github.com/lonelam/mdictlib`; the
-  repository's only release tag is `v0.1.0`, while `0.2.4` is published through
-  crates.io.
+  repository release tags include `v0.1.0` and `v0.2.5`, and `0.2.5` is
+  published through crates.io.
 - Rust is pinned to `1.97.1`; MSRV is `1.97`, edition 2024.
 - MDX and MDD, and both wire versions, use one defensive, file-backed parser
   core. The wire version is resolved once during open and never reaches lookup,
@@ -462,7 +461,7 @@ Paged-locator follow-up validation:
   public item reachable from `lib.rs` against the `v0.1.0` worktree was
   **identical** (126 items). The later `0.2.2` scan/completion methods and the
   `0.2.3` large-dictionary preset are deliberate compatible additions. The
-  `0.2.4` persistent-index candidate is another additive API and is pinned by
+  `0.2.4` persistent-index release is another additive API and is pinned by
   `tests/public_api.rs`.
 - **Version 2 corpus logical facts**: eight v2 artifacts audited with
   `examples/corpus_audit` under both the pre-refactor build (`1b3f6bb`) and the
@@ -842,28 +841,24 @@ baselines the v1 program must not regress.
 ## Release Hygiene
 
 - `.github/workflows/ci.yml` exists.
-- `CHANGELOG.md` records `0.1.0` through the published `0.2.4` plus the
-  unreleased `0.2.5` checksum-policy candidate.
+- `CHANGELOG.md` records `0.1.0` through the published `0.2.5` release.
 - `README.md`, crate rustdoc, examples, public API tests, and package metadata
-  describe the same current `0.2.5` source API and distinguish it from the
-  published `0.2.4` package.
+  describe the same published `0.2.5` source API.
 - `Cargo.toml` has `autobins = false` and a deliberate package include list.
 - Private corpus bytes, private manifests, temporary files, benchmark raw
   output, and `draft/` are not packaged.
 - Repository-maintenance corpus inventory/schema/lock metadata and Node
   acquisition tooling are also excluded from the runtime library package; the
   packaged README links their canonical GitHub paths.
-- The `v0.1.0` tag identifies the exact source used for the first package.
+- The `v0.1.0` and `v0.2.5` tags identify exact published package sources.
 
 ## Release State
 
 - Source: `https://github.com/lonelam/mdictlib`
-- Tag: `https://github.com/lonelam/mdictlib/tree/v0.1.0`
-- Package: `https://crates.io/crates/mdictlib/0.2.4`
+- Tag: `https://github.com/lonelam/mdictlib/tree/v0.2.5`
+- Package: `https://crates.io/crates/mdictlib/0.2.5`
 
-`0.2.4` is published on crates.io. Crate metadata now selects the unreleased
-`0.2.5` candidate; creating its tag and publishing it remain explicit
-maintainer actions.
+`0.2.5` is published on crates.io and tagged as `v0.2.5`.
 
 ## Active TODOs
 
@@ -880,10 +875,8 @@ maintainer actions.
 5. Extend the new Windows OALD/辭海/TLD persistent-index measurements to the
    authorized multi-platform corpus, including cold/warm positional reads and
    host-level handle residency, before assigning cross-machine expectations.
-6. Obtain explicit maintainer authorization before publishing, tagging, or
-   pushing the `0.2.5` candidate.
-7. After publication, move AALookup and its dictionary-scale harness from the
-   adjacent-checkout bridge to the registry `0.2.5` dependency, update
+6. Move AALookup and its dictionary-scale harness from the adjacent-checkout
+   bridge to the registry `0.2.5` dependency, update
    their lockfiles and parser-boundary assertion together, and keep the default
    integration free of Cargo-feature and environment-`cfg` gates.
 
