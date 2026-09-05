@@ -50,19 +50,22 @@ Implemented in this candidate:
 2. Construction reads the same parser-owned source handle, never builds the
    process locator as a prerequisite, spills bounded sort runs, merges with a
    bounded fan-in, checks cancellation, and never rereads final output.
-3. The artifact verifies its header and independently checksummed chunks;
-   every lazy positional read interprets the exact bytes whose contributing
-   chunks were verified. The unkeyed checksums detect corruption rather than
+3. The artifact stores checksum slots alongside its sections. With
+   `KeyIndexOptions::checksum_policy = Verify`, the header and independently
+   checksummed chunks are verified; every lazy positional read interprets the
+   exact bytes whose contributing chunks were verified. With `Skip`, the
+   existing checksum slots are reserved as zero markers and no chunk checksum
+   is calculated. The unkeyed checksums detect corruption rather than
    adversarial replacement. Raw digests are filters only and source bytes prove
-   a raw match, so collisions cannot change lookup semantics. The loader
-   reads the checksum directory through one bounded lazy page, so opening cost
-   does not grow with artifact size.
+   a raw match, so collisions cannot change lookup semantics. Verify mode reads
+   the checksum directory through one bounded lazy page.
 4. MDict source decoding exposes an explicit `ChecksumPolicy` through
    `OpenOptions`. `Skip` is the default throughput policy and bypasses optional
    header/block/zlib checksum comparisons while retaining size, range,
    decompression, complete-stream, and structural checks. `Verify` restores
-   fail-closed checksum mismatch errors. Persistent `.aaidx` checksums remain
-   an independent cache-format integrity mechanism.
+   fail-closed checksum mismatch errors. Persistent `.aaidx` uses its own
+   `KeyIndexOptions::checksum_policy`, also defaulting to `Skip`, so index
+   construction does not spend CPU on chunk checksums unless `Verify` is set.
 5. Synthetic v1/v2 differential, duplicate, prefix, cancellation, source-change,
    hostile-geometry, truncation, corruption, revision/identity mismatch, digest-
    collision, readable-encrypted-source indexing, fixed-open-byte, and

@@ -41,12 +41,14 @@ where
         .with_max_metadata_bytes(1024 * 1024)
         .with_build_memory_bytes(1024 * 1024)
         .with_chunk_bytes(64 * 1024)
+        .with_checksum_policy(ChecksumPolicy::Verify)
         .with_scratch_directory(index_path.parent().unwrap_or_else(|| Path::new(".")));
     let _: u64 = options.max_index_bytes();
     let _: usize = options.max_metadata_bytes();
     let _: usize = options.build_memory_bytes();
     let _: usize = options.chunk_bytes();
     let _: Option<&Path> = options.scratch_directory();
+    assert_eq!(options.checksum_policy(), ChecksumPolicy::Verify);
 
     let identity: KeyIndexSourceIdentity = file.key_index_source_identity()?;
     let _: u64 = identity.source_bytes();

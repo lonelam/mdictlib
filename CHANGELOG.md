@@ -10,7 +10,9 @@ All notable changes are recorded here.
   `Skip` is the default MDict wire-decoding policy for throughput; it retains
   structural, size, range, decompression, and complete-stream validation while
   bypassing optional checksum comparisons. `Verify` restores fail-closed
-  checksum mismatch errors. Persistent key-index checksums remain independent.
+  checksum mismatch errors. `KeyIndexOptions` exposes the same policy for
+  persistent artifacts and defaults to `Skip`, avoiding chunk checksum work
+  during index construction unless `Verify` is selected.
 
 - `KeyMatchPage`, `MdxFile::locate_page`, `MddFile::locate_page`, and
   `MdxFile::locate_page_with_key_index`. These additive APIs preserve global

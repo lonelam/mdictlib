@@ -15,6 +15,7 @@ use crate::index::{
     KEY_INDEX_FORMAT_REVISION, KEY_INDEX_NORMALIZATION_REVISION, KEY_INDEX_PARSER_REVISION,
 };
 use crate::limits::MemoryBudget;
+use crate::types::ChecksumPolicy;
 use std::io::{Seek, SeekFrom, Write};
 use std::mem::size_of;
 use std::sync::Arc;
@@ -108,7 +109,7 @@ fn eager_open_reads_the_same_fixed_bytes_for_small_and_large_indexes() {
         file.flush().unwrap();
         let source = IndexSource::new(file).unwrap();
         let memory = Arc::new(MemoryBudget::new(HEADER_BYTES * 2));
-        read_index_header(&source, &memory, &options).unwrap();
+        read_index_header(&source, &memory, &options, ChecksumPolicy::Verify).unwrap();
         assert_eq!(
             source.read_counts(),
             (
@@ -124,7 +125,13 @@ fn streaming_checksums_match_one_shot_adler_across_write_boundaries() {
     let bytes = (0..20_000)
         .map(|index| u8::try_from(index % 251).unwrap())
         .collect::<Vec<_>>();
-    let mut writer = SectionScratchWriter::new(tempfile::tempfile().unwrap(), 257, 4096).unwrap();
+    let mut writer = SectionScratchWriter::new(
+        tempfile::tempfile().unwrap(),
+        257,
+        4096,
+        ChecksumPolicy::Verify,
+    )
+    .unwrap();
     for part in bytes.chunks(333) {
         writer.write_all(part).unwrap();
     }

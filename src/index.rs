@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::core::persistent::PersistentKeyIndex;
-use crate::types::KeyOrdinal;
+use crate::types::{ChecksumPolicy, KeyOrdinal};
 
 /// Stable on-disk key-index format revision.
-pub const KEY_INDEX_FORMAT_REVISION: u32 = 2;
+pub const KEY_INDEX_FORMAT_REVISION: u32 = 3;
 
 /// Stable parser/layout compatibility revision encoded by a key index.
 pub const KEY_INDEX_PARSER_REVISION: u32 = 1;
@@ -18,7 +18,7 @@ pub const KEY_INDEX_NORMALIZATION_REVISION: u32 = 1;
 ///
 /// This value changes whenever any of the format, parser/layout, or
 /// normalization revisions changes.
-pub const KEY_INDEX_REVISION: &str = "f2-p1-n1";
+pub const KEY_INDEX_REVISION: &str = "f3-p1-n1";
 
 const DEFAULT_MAX_INDEX_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 const DEFAULT_MAX_METADATA_BYTES: usize = 64 * 1024 * 1024;
@@ -29,7 +29,9 @@ const DEFAULT_CHUNK_BYTES: usize = 64 * 1024;
 ///
 /// Defaults are finite. The build-memory ceiling covers the additional sort
 /// buffers owned by the index builder; ordinary parser block/cache memory
-/// remains governed by [`crate::Limits`].
+/// remains governed by [`crate::Limits`]. Persistent checksum comparisons are
+/// controlled separately from source decoding and default to
+/// [`ChecksumPolicy::Skip`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyIndexOptions {
     pub(crate) max_index_bytes: u64,
@@ -37,6 +39,7 @@ pub struct KeyIndexOptions {
     pub(crate) build_memory_bytes: usize,
     pub(crate) chunk_bytes: usize,
     pub(crate) scratch_directory: Option<PathBuf>,
+    pub(crate) checksum_policy: ChecksumPolicy,
 }
 
 impl KeyIndexOptions {
@@ -48,6 +51,7 @@ impl KeyIndexOptions {
             build_memory_bytes: DEFAULT_BUILD_MEMORY_BYTES,
             chunk_bytes: DEFAULT_CHUNK_BYTES,
             scratch_directory: None,
+            checksum_policy: ChecksumPolicy::Skip,
         }
     }
 
@@ -69,10 +73,10 @@ impl KeyIndexOptions {
         self
     }
 
-    /// Sets the independently checksummed section-chunk length.
+    /// Sets the section-chunk length used by the persistent artifact.
     ///
-    /// An open index retains at most one verified chunk buffer per section;
-    /// those buffers are charged to the originating dictionary memory budget.
+    /// An open index retains at most one chunk buffer per section; those
+    /// buffers are charged to the originating dictionary memory budget.
     pub const fn with_chunk_bytes(mut self, value: usize) -> Self {
         self.chunk_bytes = value;
         self
@@ -85,6 +89,17 @@ impl KeyIndexOptions {
     /// platform temporary directory.
     pub fn with_scratch_directory(mut self, directory: impl AsRef<Path>) -> Self {
         self.scratch_directory = Some(directory.as_ref().to_path_buf());
+        self
+    }
+
+    /// Selects whether persistent-index header and section checksums are
+    /// calculated during construction and verified while the artifact is read.
+    /// `Skip` retains the checksum-table slots for the existing format but
+    /// writes zero markers instead of calculating checksums; such an artifact
+    /// must be reopened with `Skip`.
+    #[must_use]
+    pub const fn with_checksum_policy(mut self, checksum_policy: ChecksumPolicy) -> Self {
+        self.checksum_policy = checksum_policy;
         self
     }
 
@@ -101,8 +116,8 @@ impl KeyIndexOptions {
     pub const fn build_memory_bytes(&self) -> usize {
         self.build_memory_bytes
     }
-    /// Returns the independently checksummed section-chunk length and maximum
-    /// size of each retained per-section verified-byte buffer.
+    /// Returns the section-chunk length and maximum size of each retained
+    /// per-section byte buffer.
     pub const fn chunk_bytes(&self) -> usize {
         self.chunk_bytes
     }
@@ -110,6 +125,11 @@ impl KeyIndexOptions {
     /// Returns the optional caller-selected scratch directory.
     pub fn scratch_directory(&self) -> Option<&Path> {
         self.scratch_directory.as_deref()
+    }
+
+    /// Returns the persistent-index checksum policy.
+    pub const fn checksum_policy(&self) -> ChecksumPolicy {
+        self.checksum_policy
     }
 }
 

@@ -166,7 +166,7 @@ version enum in the core, no per-entry branch, and no trait object.
 ### Persistent MDX key indexes
 
 - `KEY_INDEX_REVISION` aggregates independently exposed format,
-  parser/layout, and normalization revisions (`f2-p1-n1` in this candidate).
+  parser/layout, and normalization revisions (`f3-p1-n1` in this candidate).
 - `key_index_source_identity()` reads source length and filesystem modification
   time from the already-open `FileSource` without scanning contents, and binds
   those values plus the parsed physical key count. Hosts namespace each local
@@ -189,11 +189,13 @@ version enum in the core, no per-entry branch, and no trait object.
   normalized text and `u64` bounds, physical raw digests, and physical ordinals
   sorted by normalized text then ordinal.
 - Open reads a fixed 24-byte prefix and 224-byte header, validates its checksum
-  and all section geometry, and does not read the checksum directory or data
-  sections. Expected checksums are fetched through one lazy bounded page; exact
-  verified section bytes, rather than a verification flag followed by a second
-  read, are interpreted. Those caches and transient results remain charged to
-  the originating dictionary memory budget.
+  when `KeyIndexOptions::checksum_policy` is `Verify`, and always validates all
+  section geometry without reading data sections. Verify-mode expected
+  checksums are fetched through one lazy bounded page; exact verified section
+  bytes, rather than a verification flag followed by a second read, are
+  interpreted. Skip mode does not allocate that checksum page. Those caches
+  and transient results remain charged to the originating dictionary memory
+  budget.
 - Indexed lookup preserves global raw-exact precedence, normalized fallback,
   all duplicate physical ordinals, normalized prefix order, and physical scan
   order. A raw digest only filters candidates; a source key-block read proves
@@ -433,11 +435,11 @@ Checksum hot-path follow-up on 2026-09-05:
   complete-stream, or structural checks. `Verify` restores fail-closed checksum
   mismatch errors. The v2 encrypted keyword-index checksum remains necessary
   as key material, and the small v2 header checksum remains a layout signal.
-- Persistent-index checksums remain independent of `ChecksumPolicy`: decoded
-  sidecar chunks are checked on first use, while repeated access to a cached
-  chunk does not recompute it. The persistent index intentionally retains one
-  verified chunk per section, so random cross-chunk access can still incur
-  another read and checksum; this is the bounded-memory tradeoff.
+- Persistent-index checksums use their own `KeyIndexOptions::checksum_policy`,
+  also defaulting to `Skip`. `Verify` checks decoded sidecar chunks on first
+  use, while repeated access to a cached chunk does not recompute it. The
+  persistent index retains one chunk per section, so random cross-chunk access
+  can still incur another read and checksum under `Verify`.
 - A standalone 512 MiB release microbenchmark measured the old bytewise Adler
   loop at about 854 ms versus about 95 ms after block reduction (same result,
   roughly 9x faster). This is a checksum microbenchmark, not a full-corpus
