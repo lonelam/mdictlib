@@ -8,7 +8,7 @@
 
 mod support;
 
-use mdictlib::{Error, KeyOrdinal, MddFile, MdxFile};
+use mdictlib::{ChecksumPolicy, Error, KeyOrdinal, MddFile, MdxFile, OpenOptions};
 
 use support::behavior::{ExpectedEntries, assert_mdd_behavior, assert_mdx_behavior};
 use support::v1::{V1BlockCoding, V1FixtureBuilder, repeating_payload};
@@ -309,6 +309,21 @@ fn a_v2_header_with_a_v1_body_fails_without_retrying_the_other_grammar() {
     );
 }
 
+#[test]
+fn a_v1_generated_version_cannot_require_a_v2_reader() {
+    let fixture = V1FixtureBuilder::mdx([("alpha", "record")])
+        .engine_versions("1.2", "2.0")
+        .coding(V1BlockCoding::None)
+        .build();
+    let file = fixture.write("v1-generated-v2-required");
+    assert!(matches!(
+        MdxFile::open(file.path()),
+        Err(Error::InvalidFormat(
+            "GeneratedByEngineVersion 1 conflicts with RequiredEngineVersion"
+        ))
+    ));
+}
+
 // ---------------------------------------------------------------------------
 // Malformed version 1 files
 // ---------------------------------------------------------------------------
@@ -330,16 +345,17 @@ fn sample_mdx() -> support::v1::V1Fixture {
 /// during lazy decoding are caught too.
 fn open_and_drain(fixture: &support::v1::V1Fixture, name: &str) -> Result<(), Error> {
     let file = fixture.write(name);
+    let options = OpenOptions::new().with_checksum_policy(ChecksumPolicy::Verify);
     match fixture.kind {
         FixtureKind::Mdx => {
-            let dictionary = MdxFile::open(file.path())?;
+            let dictionary = MdxFile::open_with_options(file.path(), &options)?;
             for entry in dictionary.entries() {
                 entry?;
             }
             dictionary.locate("alpha")?;
         }
         FixtureKind::Mdd => {
-            let dictionary = MddFile::open(file.path())?;
+            let dictionary = MddFile::open_with_options(file.path(), &options)?;
             for resource in dictionary.resources() {
                 resource?;
             }
@@ -600,7 +616,8 @@ fn v1_iteration_fuses_after_the_first_lazy_error() {
     let range = fixture.layout.record_blocks[1].clone();
     fixture.corrupt_block_checksum(&range);
     let file = fixture.write("v1-fused-iteration");
-    let dictionary = MdxFile::open(file.path()).unwrap();
+    let options = OpenOptions::new().with_checksum_policy(ChecksumPolicy::Verify);
+    let dictionary = MdxFile::open_with_options(file.path(), &options).unwrap();
 
     let mut entries = dictionary.entries();
     let mut errors = 0;
@@ -622,7 +639,8 @@ fn v1_deterministic_failures_replay_identically() {
     let range = fixture.layout.key_blocks[1].clone();
     fixture.corrupt_block_checksum(&range);
     let file = fixture.write("v1-cached-failure");
-    let dictionary = MdxFile::open(file.path()).unwrap();
+    let options = OpenOptions::new().with_checksum_policy(ChecksumPolicy::Verify);
+    let dictionary = MdxFile::open_with_options(file.path(), &options).unwrap();
 
     let ordinal = KeyOrdinal::new(2);
     let first = dictionary.key_at(ordinal).unwrap_err().to_string();

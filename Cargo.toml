@@ -1,6 +1,6 @@
 [package]
 name = "mdictlib"
-version = "0.2.0"
+version = "0.2.5"
 edition = "2024"
 autobins = false
 authors = ["Lonelam <laizenan@gmail.com>"]
@@ -34,6 +34,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
 [dependencies]
 encoding_rs = "0.8"
 miniz_oxide = "0.9"
+tempfile = "3"
 
 [dependencies.lzokay]
 version = "2.0.1"

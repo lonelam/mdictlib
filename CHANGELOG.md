@@ -15,6 +15,135 @@ All notable changes are recorded here.
   another host is refused with `Error::InvalidData` rather than read as a local
   path. Paths are untouched, including one that merely contains the text.
 
+## [0.2.5] - 2026-09-05
+
+### Added
+
+- `ChecksumPolicy::{Skip, Verify}` and `OpenOptions::with_checksum_policy`.
+  `Skip` is the default MDict wire-decoding policy for throughput; it retains
+  structural, size, range, decompression, and complete-stream validation while
+  bypassing optional checksum comparisons. `Verify` restores fail-closed
+  checksum mismatch errors. `KeyIndexOptions` exposes the same policy for
+  persistent artifacts and defaults to `Skip`, avoiding chunk checksum work
+  during index construction unless `Verify` is selected.
+
+- `KeyMatchPage`, `MdxFile::locate_page`, `MddFile::locate_page`, and
+  `MdxFile::locate_page_with_key_index`. These additive APIs preserve global
+  raw-exact precedence, exact totals, duplicates, and physical order while
+  retaining only the requested ordinal window.
+- A production persistent MDX key-index API: stable format/parser/normalization
+  revision constants, lightweight source metadata identity, bounded and
+  cancellable construction to a caller-provided seekable sink or create-new
+  path, fixed-cost open, and indexed exact/prefix/physical traversal.
+- A file-backed index format with checked 64-bit aligned sections, physical
+  normalized text and bounds, normalized-order ordinals, raw-digest filters,
+  a checksummed fixed header, lazily paged checksum metadata, and independently
+  verified lazy section chunks. Construction uses external merge runs and does
+  not instantiate the existing process-lifetime locator.
+- Structured `KeyIndexRejection`, cancellation, and observed source-change
+  errors. Corrupt, stale, oversized, truncated, or incompatible sidecars remain
+  isolated from the readable MDX source.
+
+### Performance
+
+- Persistent-index construction now buffers section/run writes, bypasses
+  scratch-run serialization for a one-batch sort, appends normalized keys to a
+  shared arena, uses bounded per-run read buffers and allocation reuse during
+  external merge, and writes the final merge directly to the ordinal section.
+- Construction no longer performs full-source hashing, rereads the completed
+  sidecar, or rescans every source row. Final destinations require only
+  `Write + Seek`; open reads a fixed 248 bytes before lazy use.
+
+### Security
+
+- Persistent indexes are plaintext normalized-headword derivatives. Every
+  readable encrypted MDX follows the ordinary index path without a policy
+  option; hosts own storage and lifecycle policy.
+- Raw-key digests remain candidate filters only. A positive exact result is
+  always rechecked against the current source key block, including collisions.
+- Persistent normalized scans verify each visited source key's normalized
+  text and raw digest before exposing index text, rejecting same-layout source
+  mutation as `SourceKeyMismatch`.
+- Lazy reads interpret the exact chunk bytes whose checksums were verified,
+  rather than caching a verification flag across a later mutable reread.
+  Fixed header bytes, one bounded checksum page, runtime chunk/read buffers,
+  and persistent match ordinals are aggregate-memory accounted; pathological
+  equal ranges are capped by `Limits::locator_bytes`.
+- Source length and modification time are a local freshness stamp, not content
+  authentication or cross-path deduplication. Unkeyed checksums detect ordinary
+  corruption only; hosts namespace rebuildable caches by stable source location
+  plus `KEY_INDEX_REVISION`.
+
+### Package
+
+- Bumped the package from `0.2.4` to `0.2.5` for explicit source and
+  persistent-index `ChecksumPolicy` controls, with `Skip` as the default.
+
+## [0.2.3] - 2026-08-13
+
+### Added
+
+- `Limits::large_dictionary()`, a finite, opt-in high-headroom policy for
+  unusually large dictionaries.
+
+### Fixed
+
+- Header XML accepts both standard attribute quote styles and both `&#x...;`
+  and `&#X...;` hexadecimal entities, rejects odd UTF-16LE lengths before
+  decoding, and rejects content after the one top-level header tag.
+- Version 1 and 2 MDD headers that omit `KeyCaseSensitive` now use the
+  case-sensitive resource-path default used by the sibling `mdx` metadata
+  reader; explicit header values still win, and the MDX default remains
+  unchanged. Reader-specific MDD sort-key folding remains outside this fix.
+- MDD lookup now treats leading separators and `/` versus `\\` as equivalent
+  resource-path spelling differences, so callers do not need a compatibility
+  retry ladder.
+- Restored finite default parser ceilings after the temporary unlimited policy;
+  the large-dictionary preset keeps the TLD-sized workload supported without
+  making untrusted opens unbounded.
+- Complete `GeneratedByEngineVersion` and `RequiredEngineVersion` spellings are
+  validated in the parser, future required majors are refused, and incoherent
+  version 1-generated/version 2-required headers are rejected. Dispatch still
+  uses `GeneratedByEngineVersion` exactly once.
+
+## [0.2.2] - 2026-08-12
+
+### Added
+
+- `MdxFile::prefix_keys`, returning the physical entries whose key starts with a
+  prefix under the header's own normalization, in normalized order.
+- `MdxFile::scan_normalized_keys`, which lends every entry's normalized key in
+  physical order without copying it. Together these let a caller apply its own
+  completion or edit-distance policy across the whole key space without building
+  and retaining a second copy of it.
+
+### Changed
+
+- The key locator holds normalized key text in one arena with `u32` bounds and a
+  single sorted index, in place of a boxed raw *and* normalized string per row
+  plus two sorted indexes. On a 4.36-million-entry, 190 MB MDX this cuts the
+  locator from 300 MiB to 114 MiB and its build from 3.5 s to 1.9 s.
+- `locate` resolves raw-exact matches inside the normalized equal range rather
+  than from a second file-wide index: raw equality implies normalized equality,
+  so no match can lie outside it. Rows are filtered by a raw-text digest and a
+  digest hit is confirmed against its key block, which makes a locate-only hit
+  read one key block that it previously did not. A `locate` immediately followed
+  by reading the entry — the ordinary case — is unchanged, because that block is
+  the one the record read already needed. A locate that misses got faster.
+
+## [0.2.1] - 2026-08-12
+
+### Added
+
+- `Limits::with_unlimited_locator_entries()` for callers that intentionally
+  rely only on the locator's internal `u32` row width.
+
+### Changed
+
+- Temporarily changed default parser ceilings to unlimited values. The current
+  unreleased changes restore finite defaults and add a separate large-file
+  choice.
+
 ## [0.2.0] - 2026-08-11
 
 ### Added
@@ -43,7 +172,8 @@ All notable changes are recorded here.
   cross-version grammar retry.
 - Unsupported major versions now report `MDict format major version other than
   1 or 2`. Version resolution still keys on `GeneratedByEngineVersion`,
-  unchanged from `0.1.0`.
+  unchanged from `0.1.0`; `RequiredEngineVersion` is validated independently
+  and cannot redirect dispatch.
 
 This restructuring is behavior-preserving for version 2: the public API is
 byte-for-byte identical to `v0.1.0`, and version 2 corpus entry counts, key
@@ -175,6 +305,11 @@ digests, and payload digests are unchanged.
   to the library, examples, tests, documentation, and license material.
 - Released version `0.1.0` as the first public release.
 
-[Unreleased]: https://github.com/lonelam/mdictlib/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/lonelam/mdictlib/compare/v0.1.0...v0.2.0
+[Unreleased]: https://github.com/lonelam/mdictlib/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/lonelam/mdictlib/compare/d00d360...v0.2.5
+[0.2.4]: https://github.com/lonelam/mdictlib/compare/31a3e9f...d00d360
+[0.2.3]: https://github.com/lonelam/mdictlib/compare/bc72444...31a3e9f
+[0.2.2]: https://github.com/lonelam/mdictlib/compare/fe22dfd...bc72444
+[0.2.1]: https://github.com/lonelam/mdictlib/compare/ad4afaa...fe22dfd
+[0.2.0]: https://github.com/lonelam/mdictlib/compare/v0.1.0...ad4afaa
 [0.1.0]: https://github.com/lonelam/mdictlib/tree/v0.1.0

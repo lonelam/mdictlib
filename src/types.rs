@@ -186,6 +186,11 @@ impl Header {
     }
 
     /// Returns whether key matching is declared case-sensitive.
+    ///
+    /// When the header omits `KeyCaseSensitive`, MDX uses the historical
+    /// case-insensitive default and MDD uses the sibling `mdx` metadata
+    /// reader's case-sensitive resource-path default. An explicit header
+    /// value overrides either.
     pub const fn key_case_sensitive(&self) -> bool {
         self.key_case_sensitive
     }
@@ -286,11 +291,27 @@ impl fmt::Debug for Passcode {
     }
 }
 
+/// Controls whether MDict wire checksums are calculated and compared.
+///
+/// [`ChecksumPolicy::Skip`] is the default for throughput. It does not skip
+/// size, range, decompression, or structural validation. A small checksum may
+/// still be calculated when it is needed to distinguish wire layouts. Use
+/// [`ChecksumPolicy::Verify`] when checksum mismatch detection is required.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChecksumPolicy {
+    /// Skip optional MDict wire checksum comparisons.
+    #[default]
+    Skip,
+    /// Calculate and compare MDict wire checksums.
+    Verify,
+}
+
 /// Options used when opening an MDX or MDD file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenOptions {
     pub(crate) passcode: Option<Passcode>,
     pub(crate) limits: Limits,
+    pub(crate) checksum_policy: ChecksumPolicy,
 }
 
 impl OpenOptions {
@@ -299,6 +320,7 @@ impl OpenOptions {
         Self {
             passcode: None,
             limits: Limits::new(),
+            checksum_policy: ChecksumPolicy::Skip,
         }
     }
 
@@ -316,9 +338,21 @@ impl OpenOptions {
         self
     }
 
+    /// Selects whether MDict wire checksums are verified while decoding.
+    #[must_use]
+    pub const fn with_checksum_policy(mut self, checksum_policy: ChecksumPolicy) -> Self {
+        self.checksum_policy = checksum_policy;
+        self
+    }
+
     /// Returns the configured safety limits.
     pub const fn limits(&self) -> &Limits {
         &self.limits
+    }
+
+    /// Returns the configured MDict wire checksum policy.
+    pub const fn checksum_policy(&self) -> ChecksumPolicy {
+        self.checksum_policy
     }
 }
 
@@ -352,6 +386,11 @@ pub struct Limits {
 
 impl Limits {
     /// Creates the default defensive limit policy.
+    ///
+    /// These ceilings are intentionally generous for ordinary dictionaries,
+    /// but still reject hostile file declarations before their corresponding
+    /// read or allocation. Applications that intentionally admit unusually
+    /// large dictionaries can opt into [`Self::large_dictionary`].
     pub const fn new() -> Self {
         Self {
             header_xml_bytes: 16 * 1024 * 1024,
@@ -366,6 +405,32 @@ impl Limits {
             locator_entries: 10_000_000,
             locator_bytes: 512 * 1024 * 1024,
             working_memory_bytes: 1024 * 1024 * 1024,
+        }
+    }
+
+    /// Creates a finite policy for unusually large dictionaries on modern
+    /// 64-bit hosts.
+    ///
+    /// Limits are ceilings rather than preallocations. This preset is based on
+    /// a measured 4,362,467-entry, 190 MB MDX whose populated locator retains
+    /// about 121 MB; it leaves substantial per-section and working-memory
+    /// headroom while preserving limit-before-read and limit-before-allocation
+    /// behavior. Host applications should still apply an aggregate budget when
+    /// opening many files.
+    pub const fn large_dictionary() -> Self {
+        Self {
+            header_xml_bytes: 64 * 1024 * 1024,
+            header_attributes: 16 * 1024,
+            key_index_bytes: 512 * 1024 * 1024,
+            record_index_bytes: 512 * 1024 * 1024,
+            compressed_block_bytes: 1024 * 1024 * 1024,
+            decompressed_block_bytes: 2 * 1024 * 1024 * 1024,
+            block_metadata_bytes: 512 * 1024 * 1024,
+            key_block_entries: 16_000_000,
+            materialized_record_bytes: 512 * 1024 * 1024,
+            locator_entries: u32::MAX as u64,
+            locator_bytes: 1024 * 1024 * 1024,
+            working_memory_bytes: 2 * 1024 * 1024 * 1024,
         }
     }
 
@@ -433,13 +498,23 @@ impl Limits {
     }
 
     /// Sets the maximum number of physical rows retained by the lookup locator.
+    /// The effective upper bound is also limited by the locator index width.
     #[must_use]
     pub const fn with_locator_entries(mut self, value: u64) -> Self {
         self.locator_entries = value;
         self
     }
 
-    /// Sets the maximum estimated retained size of the lookup locator.
+    /// Removes locator row-count limiting so lookups are only bounded by the
+    /// locator index width (u32).
+    #[must_use]
+    pub const fn with_unlimited_locator_entries(mut self) -> Self {
+        self.locator_entries = u64::MAX;
+        self
+    }
+
+    /// Sets the maximum estimated retained size of the lookup locator and the
+    /// maximum ordinal bytes materialized for one persistent-index match set.
     #[must_use]
     pub const fn with_locator_bytes(mut self, value: usize) -> Self {
         self.locator_bytes = value;
@@ -618,5 +693,42 @@ mod tests {
         let user_id = "x".repeat(4097);
         let error = Passcode::new("0123456789abcdef0123456789abcdef", &user_id).unwrap_err();
         assert!(matches!(error, Error::InvalidPasscode(_)));
+    }
+
+    #[test]
+    fn unlimited_locator_entries_overrides_row_cap() {
+        let limits = Limits::new()
+            .with_locator_entries(1)
+            .with_unlimited_locator_entries();
+        assert_eq!(limits.locator_entries(), u64::MAX);
+    }
+
+    #[test]
+    fn large_dictionary_policy_is_finite_and_looser_than_default() {
+        let default = Limits::new();
+        let large = Limits::large_dictionary();
+
+        assert!(large.header_xml_bytes() > default.header_xml_bytes());
+        assert!(large.key_index_bytes() > default.key_index_bytes());
+        assert!(large.materialized_record_bytes() > default.materialized_record_bytes());
+        assert!(large.locator_bytes() > default.locator_bytes());
+        assert!(large.working_memory_bytes() > default.working_memory_bytes());
+        assert!(large.locator_entries() > default.locator_entries());
+        for value in [
+            large.header_xml_bytes(),
+            large.header_attributes(),
+            large.key_index_bytes(),
+            large.record_index_bytes(),
+            large.compressed_block_bytes(),
+            large.decompressed_block_bytes(),
+            large.block_metadata_bytes(),
+            large.materialized_record_bytes(),
+            large.locator_bytes(),
+            large.working_memory_bytes(),
+        ] {
+            assert_ne!(value, usize::MAX);
+        }
+        assert_ne!(large.key_block_entries(), u64::MAX);
+        assert_ne!(large.locator_entries(), u64::MAX);
     }
 }

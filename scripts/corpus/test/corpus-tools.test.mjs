@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -1134,9 +1134,7 @@ test("bootstrap preflights advertised bytes, writes inspect failures, and reuses
 
   const corpusRoot = path.join(root, "bytes");
   const draftPath = path.join(root, "draft.json");
-  const fakeCargo = path.join(root, process.platform === "win32" ? "fake-cargo.cmd" : "fake-cargo");
-  await writeFile(fakeCargo, process.platform === "win32" ? "@exit /b 2\r\n" : "#!/bin/sh\nexit 2\n");
-  if (process.platform !== "win32") await chmod(fakeCargo, 0o700);
+  const fakeCargo = path.join(root, "fake-cargo");
   await lockCorpusMain([
     "--selection", selectionPath,
     "--inventory", inventoryPath,
@@ -1145,7 +1143,10 @@ test("bootstrap preflights advertised bytes, writes inspect failures, and reuses
     "--cargo", fakeCargo,
     "--retries", "0",
     "--timeout-ms", "5000",
-  ], { networkPolicy: TEST_NETWORK_POLICY });
+  ], {
+    networkPolicy: TEST_NETWORK_POLICY,
+    spawnSync: () => ({ error: undefined, status: 2 }),
+  });
   const draft = JSON.parse(await readFile(draftPath, "utf8"));
   assert.equal(draft.acquisitionOutcomes[0].status, "acquired");
   assert.equal(draft.entries[0].artifacts[0].observedEntries, null);
@@ -1157,9 +1158,7 @@ test("bootstrap preflights advertised bytes, writes inspect failures, and reuses
 
   const staleDraftPath = path.join(root, "stale-draft.json");
   await writeFile(staleDraftPath, "stale bootstrap evidence\n");
-  const noOpCargo = path.join(root, process.platform === "win32" ? "noop-cargo.cmd" : "noop-cargo");
-  await writeFile(noOpCargo, process.platform === "win32" ? "@exit /b 0\r\n" : "#!/bin/sh\nexit 0\n");
-  if (process.platform !== "win32") await chmod(noOpCargo, 0o700);
+  const noOpCargo = path.join(root, "noop-cargo");
   const previousTarget = process.env.CARGO_TARGET_DIR;
   process.env.CARGO_TARGET_DIR = path.join(root, "missing-target");
   try {
@@ -1170,7 +1169,10 @@ test("bootstrap preflights advertised bytes, writes inspect failures, and reuses
         "--output", staleDraftPath,
         "--root", corpusRoot,
         "--cargo", noOpCargo,
-      ], { networkPolicy: TEST_NETWORK_POLICY }),
+      ], {
+        networkPolicy: TEST_NETWORK_POLICY,
+        spawnSync: () => ({ error: undefined, status: 0 }),
+      }),
       /ENOENT|no such file|failed to open/i,
     );
   } finally {

@@ -2,7 +2,9 @@ mod support;
 
 use std::sync::{Arc, Barrier};
 
-use mdictlib::{Error, KeyOrdinal, Limits, MddFile, MdxFile, OpenOptions, Passcode};
+use mdictlib::{
+    ChecksumPolicy, Error, KeyOrdinal, Limits, MddFile, MdxFile, OpenOptions, Passcode,
+};
 
 use support::{
     FixtureBuilder, FixtureCompression, FixtureEncoding, FixturePasscode, independent_adler32,
@@ -77,8 +79,9 @@ fn legacy_v2_keyword_index_requires_the_exact_checksum_layout_signal() {
     let checksum_offset = wrong_checksum.layout.keyword_header_offset + 40;
     wrong_checksum.bytes[checksum_offset..checksum_offset + 4].fill(0);
     let dictionary_file = wrong_checksum.write("legacy-v2-wrong-header-checksum");
+    let options = OpenOptions::new().with_checksum_policy(ChecksumPolicy::Verify);
     assert!(matches!(
-        MdxFile::open(dictionary_file.path()),
+        MdxFile::open_with_options(dictionary_file.path(), &options),
         Err(Error::ChecksumMismatch {
             context: "keyword section header",
             ..

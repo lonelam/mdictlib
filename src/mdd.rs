@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use crate::core::{MdictFile, RecordDescriptor, RecordIter};
 use crate::error::{Error, Result};
-use crate::lookup::KeyMatches;
+use crate::lookup::{KeyMatchPage, KeyMatches};
 use crate::types::{ContainerKind, Header, KeyEntry, KeyOrdinal, MemoryUsage, OpenOptions};
 
 /// An opened MDD resource dictionary.
@@ -289,6 +289,29 @@ impl MddFile {
         self.inner
             .locate_keys(query)
             .map(|matches| matches.map(KeyMatches::from_located))
+    }
+
+    /// Locates a bounded window of matching physical resources without
+    /// reading bytes or materializing the complete duplicate set.
+    ///
+    /// Ordering, duplicate identity, total-count reporting, and global
+    /// raw-exact precedence are identical to [`Self::locate`]. A page beyond
+    /// the complete match set is `Some` but empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the global locator cannot be built, source key data
+    /// is malformed or unreadable, or the requested page exceeds a configured
+    /// safety or aggregate-memory limit.
+    pub fn locate_page(
+        &self,
+        query: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Option<KeyMatchPage>> {
+        self.inner
+            .locate_key_page(query, offset, limit)
+            .map(|page| page.map(KeyMatchPage::from_located))
     }
 
     /// Resolves a query to a source-bound resource span without reading its

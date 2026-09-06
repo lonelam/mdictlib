@@ -2,7 +2,7 @@ mod support;
 
 use std::io::Write;
 
-use mdictlib::{Error, KeyOrdinal, MddFile, MdxFile};
+use mdictlib::{ChecksumPolicy, Error, KeyOrdinal, MddFile, MdxFile, OpenOptions};
 
 use support::FixtureBuilder;
 
@@ -18,6 +18,49 @@ fn unsupported_major_version_wins_over_its_legacy_encoding_label() {
     let dictionary_file = fixture.write("unsupported-version-before-encoding");
     assert!(matches!(
         MdxFile::open(dictionary_file.path()),
+        Err(Error::Unsupported(
+            "MDict format major version other than 1 or 2"
+        ))
+    ));
+}
+
+#[test]
+fn generated_version_remains_dispatch_authority_while_required_version_is_validated() {
+    let compatible = FixtureBuilder::mdx([("alpha", "record")])
+        .engine_versions("2.0", "1.2")
+        .build();
+    let compatible_file = compatible.write("generated-v2-required-v1");
+    let dictionary = MdxFile::open(compatible_file.path()).unwrap();
+    assert_eq!(dictionary.header().generated_by_engine_version(), "2.0");
+    assert_eq!(dictionary.header().required_engine_version(), "1.2");
+
+    let future_required = FixtureBuilder::mdx([("alpha", "record")])
+        .engine_versions("2.0", "3.0")
+        .build();
+    let future_required_file = future_required.write("future-required-version");
+    assert!(matches!(
+        MdxFile::open(future_required_file.path()),
+        Err(Error::Unsupported(
+            "required MDict engine major version other than 1 or 2"
+        ))
+    ));
+
+    let malformed_required = FixtureBuilder::mdx([("alpha", "record")])
+        .engine_versions("2.0", "2.bad")
+        .build();
+    let malformed_required_file = malformed_required.write("malformed-required-version");
+    assert!(matches!(
+        MdxFile::open(malformed_required_file.path()),
+        Err(Error::InvalidFormat("malformed RequiredEngineVersion"))
+    ));
+
+    let unsupported_generated = FixtureBuilder::mdx([("alpha", "record")])
+        .engine_versions("3.0", "2.bad")
+        .build();
+    let unsupported_generated_file =
+        unsupported_generated.write("unsupported-generated-precedence");
+    assert!(matches!(
+        MdxFile::open(unsupported_generated_file.path()),
         Err(Error::Unsupported(
             "MDict format major version other than 1 or 2"
         ))
@@ -243,7 +286,8 @@ fn key_block_corruption_is_lazy_and_key_and_entry_iterators_terminate_after_erro
     let corrupt_block = fixture.layout.key_blocks[1].clone();
     fixture.corrupt_block_checksum(&corrupt_block);
     let dictionary_file = fixture.write("lazy-corrupt-key-block");
-    let dictionary = MdxFile::open(dictionary_file.path()).unwrap();
+    let options = OpenOptions::new().with_checksum_policy(ChecksumPolicy::Verify);
+    let dictionary = MdxFile::open_with_options(dictionary_file.path(), &options).unwrap();
 
     let mut keys = dictionary.keys();
     assert_eq!(keys.next().unwrap().unwrap().key(), "alpha");
@@ -268,7 +312,7 @@ fn key_block_corruption_is_lazy_and_key_and_entry_iterators_terminate_after_erro
     let corrupt_block = fixture.layout.record_blocks[1].clone();
     fixture.corrupt_block_checksum(&corrupt_block);
     let resource_file = fixture.write("lazy-corrupt-resource-block");
-    let resources = MddFile::open(resource_file.path()).unwrap();
+    let resources = MddFile::open_with_options(resource_file.path(), &options).unwrap();
     let mut iter = resources.resources();
     assert_eq!(iter.next().unwrap().unwrap().bytes(), b"A");
     assert!(iter.next().unwrap().is_err());
@@ -283,7 +327,8 @@ fn deterministic_lazy_failures_are_cached_after_the_first_attempt() {
     fixture.corrupt_block_checksum(&key_block);
     let dictionary_file = fixture.write("cached-corrupt-key-block");
 
-    let dictionary = MdxFile::open(dictionary_file.path()).unwrap();
+    let options = OpenOptions::new().with_checksum_policy(ChecksumPolicy::Verify);
+    let dictionary = MdxFile::open_with_options(dictionary_file.path(), &options).unwrap();
     assert!(matches!(
         dictionary.key_at(KeyOrdinal::new(0)).unwrap_err(),
         Error::ChecksumMismatch { .. }
@@ -293,7 +338,7 @@ fn deterministic_lazy_failures_are_cached_after_the_first_attempt() {
         Error::ChecksumMismatch { .. }
     ));
 
-    let dictionary = MdxFile::open(dictionary_file.path()).unwrap();
+    let dictionary = MdxFile::open_with_options(dictionary_file.path(), &options).unwrap();
     assert!(matches!(
         dictionary.locate("alpha").unwrap_err(),
         Error::ChecksumMismatch { .. }
@@ -307,7 +352,8 @@ fn deterministic_lazy_failures_are_cached_after_the_first_attempt() {
     let record_block = fixture.layout.record_blocks[0].clone();
     fixture.corrupt_block_checksum(&record_block);
     let dictionary_file = fixture.write("cached-corrupt-record-block");
-    let dictionary = MdxFile::open(dictionary_file.path()).unwrap();
+    let options = OpenOptions::new().with_checksum_policy(ChecksumPolicy::Verify);
+    let dictionary = MdxFile::open_with_options(dictionary_file.path(), &options).unwrap();
     assert!(matches!(
         dictionary.entry_at(KeyOrdinal::new(0)).unwrap_err(),
         Error::ChecksumMismatch { .. }
@@ -379,7 +425,8 @@ fn record_block_corruption_is_lazy_and_does_not_hide_earlier_records() {
     let corrupt_block = fixture.layout.record_blocks[1].clone();
     fixture.corrupt_block_checksum(&corrupt_block);
     let dictionary_file = fixture.write("lazy-corrupt-record-block");
-    let dictionary = MdxFile::open(dictionary_file.path()).unwrap();
+    let options = OpenOptions::new().with_checksum_policy(ChecksumPolicy::Verify);
+    let dictionary = MdxFile::open_with_options(dictionary_file.path(), &options).unwrap();
 
     assert_eq!(
         dictionary
@@ -391,7 +438,7 @@ fn record_block_corruption_is_lazy_and_does_not_hide_earlier_records() {
     );
     assert!(dictionary.entry_at(KeyOrdinal::new(1)).is_err());
 
-    let dictionary = MdxFile::open(dictionary_file.path()).unwrap();
+    let dictionary = MdxFile::open_with_options(dictionary_file.path(), &options).unwrap();
     let mut entries = dictionary.entries();
     assert_eq!(entries.next().unwrap().unwrap().text(), "A");
     assert!(entries.next().unwrap().is_err());
@@ -401,6 +448,7 @@ fn record_block_corruption_is_lazy_and_does_not_hide_earlier_records() {
 
 #[test]
 fn structural_count_length_and_checksum_corruptions_fail_closed() {
+    let options = OpenOptions::new().with_checksum_policy(ChecksumPolicy::Verify);
     let base = || {
         FixtureBuilder::mdx([("alpha", "A"), ("omega", "O")])
             .key_blocks(vec![1, 1])
@@ -412,18 +460,18 @@ fn structural_count_length_and_checksum_corruptions_fail_closed() {
     let checksum_byte = keyword_checksum.layout.keyword_header_offset + 40;
     keyword_checksum.bytes[checksum_byte] ^= 0x40;
     let file = keyword_checksum.write("bad-keyword-header-checksum");
-    assert!(MdxFile::open(file.path()).is_err());
+    assert!(MdxFile::open_with_options(file.path(), &options).is_err());
 
     let mut header_checksum = base();
     header_checksum.bytes[header_checksum.layout.header_checksum_offset] ^= 0x40;
     let file = header_checksum.write("bad-header-checksum");
-    assert!(MdxFile::open(file.path()).is_err());
+    assert!(MdxFile::open_with_options(file.path(), &options).is_err());
 
     let mut key_index_checksum = base();
     let key_index = key_index_checksum.layout.key_index_block.clone();
     key_index_checksum.corrupt_block_checksum(&key_index);
     let file = key_index_checksum.write("bad-key-index-checksum");
-    assert!(MdxFile::open(file.path()).is_err());
+    assert!(MdxFile::open_with_options(file.path(), &options).is_err());
 
     let mut key_entry_count = base();
     key_entry_count.set_keyword_u64(1, 3);

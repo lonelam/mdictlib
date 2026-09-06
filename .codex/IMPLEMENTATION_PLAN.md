@@ -1,16 +1,17 @@
 # mdictlib Implementation Roadmap
 
-Last updated: 2026-08-11 (v0.2.0 selected)
+Last updated: 2026-09-05 (v0.2.5 published)
 
 ## 1. Release State And Active Program
 
 `mdictlib` `0.1.0` is the first public release and supports MDict major version
 2 only. Every milestone in the released roadmap (sections 6 and 10) is complete.
 
-The **MDict version 1 compatibility program is implemented** in the working
-tree. Milestones 1 through 6 are complete; milestone 7 is complete except for
-publishing. Crate metadata and `CHANGELOG.md` select **`0.2.0`**; nothing has
-been published, tagged, or pushed.
+The **MDict version 1 compatibility program is implemented**. Milestones 1
+through 6 are complete, and its `0.2.0` release decision is historical. Crate
+metadata and crates.io are now at released **`0.2.5`**, which includes the
+explicit checksum policy with `Skip` as the default; the repository exposes the
+`v0.2.5` tag.
 
 Real version 1 MDD evidence is complete: 16 candidates were acquired under an
 explicitly approved bounded proposal and all 16 passed full validation, 14 of
@@ -31,6 +32,78 @@ Evidence rules (unchanged, and binding on the v1 program):
 - performance numbers are baselines on the measured host, not universal SLAs;
 - a number carried forward from an earlier session without a tracked artifact is
   labelled as such and must be re-derived before it can gate anything.
+
+### 1.1 Active `0.2.4` persistent-index release sequence
+
+This is the mdictlib portion of AALookup's 2,000-dictionary program. The
+application-level roadmap is
+[`aalookup/docs/dictionary-scale-plan.md`](../../aalookup/docs/dictionary-scale-plan.md), and the
+ownership/cutover boundary is
+[`aalookup/docs/mdictlib-integration.md`](../../aalookup/docs/mdictlib-integration.md).
+
+Implemented in this candidate:
+
+1. Additive root APIs expose lightweight source identity, bounded construction,
+   fixed-cost lazy index opening, raw/normalized lookup, normalized prefix
+   lookup, physical traversal, stable revisions, and structured rejection.
+2. Construction reads the same parser-owned source handle, never builds the
+   process locator as a prerequisite, spills bounded sort runs, merges with a
+   bounded fan-in, checks cancellation, and never rereads final output.
+3. The artifact stores checksum slots alongside its sections. With
+   `KeyIndexOptions::checksum_policy = Verify`, the header and independently
+   checksummed chunks are verified; every lazy positional read interprets the
+   exact bytes whose contributing chunks were verified. With `Skip`, the
+   existing checksum slots are reserved as zero markers and no chunk checksum
+   is calculated. The unkeyed checksums detect corruption rather than
+   adversarial replacement. Raw digests are filters only and source bytes prove
+   a raw match, so collisions cannot change lookup semantics. Verify mode reads
+   the checksum directory through one bounded lazy page.
+4. MDict source decoding exposes an explicit `ChecksumPolicy` through
+   `OpenOptions`. `Skip` is the default throughput policy and bypasses optional
+   header/block/zlib checksum comparisons while retaining size, range,
+   decompression, complete-stream, and structural checks. `Verify` restores
+   fail-closed checksum mismatch errors. Persistent `.aaidx` uses its own
+   `KeyIndexOptions::checksum_policy`, also defaulting to `Skip`, so index
+   construction does not spend CPU on chunk checksums unless `Verify` is set.
+5. Synthetic v1/v2 differential, duplicate, prefix, cancellation, source-change,
+   hostile-geometry, truncation, corruption, revision/identity mismatch, digest-
+   collision, readable-encrypted-source indexing, fixed-open-byte, and
+   greater-than-32-run merge tests are present. The current Windows package
+   candidate passes formatting, all-target/all-feature tests, clippy with
+   warnings denied, strict rustdoc/doctests, and offline package verification;
+   exact evidence is recorded in `.codex/STATUS.md`.
+
+The handoff deliberately remains split. mdictlib owns parser semantics, the
+portable artifact and its validation. AALookup owns source-location-scoped placement,
+same-filesystem atomic publication, build locks and durable jobs, disk/job/handle
+budgets, live leases, garbage collection, runtime pools, UI state, and fallback.
+
+AALookup integration has now started against the adjacent `0.2.4` checkout.
+Its normal build compiles the persistent-index API by default, with no Cargo
+feature or build-script environment `cfg` gate. This path dependency is a local
+integration bridge only: the production dependency cutover still requires an
+authorized `0.2.4` publication and matching registry updates in AALookup and
+its dictionary-scale harness.
+
+Release gates, in order:
+
+1. Benchmark construction, cold/warm open and positional reads,
+   retained memory, and handle residency on an authorized large corpus. Record
+   host, toolchain, immutable manifest identity, command, repetitions, and raw
+   output; do not turn one host's observation into a universal SLA.
+2. Resolve or explicitly accept the outstanding release-hygiene and corpus risks
+   in `.codex/STATUS.md`. No known ambiguity may be relaxed merely to publish the
+   index API.
+3. Obtain explicit maintainer authorization before publishing, tagging, or
+   pushing `0.2.4`.
+4. After authorized publication, switch AALookup and its dictionary-scale
+   harness from the adjacent-checkout bridge to registry `0.2.4`; update their
+   lockfiles and parser-boundary version assertion together. The default API
+   integration must remain free of Cargo-feature and environment-`cfg` gates,
+   and `npm run mdictlib:check` must remain green through the cutover.
+5. Run AALookup's cold/warm 2,000-source, cancellation, memory/page-cache/handle,
+   replacement-source, and Windows/macOS rendering acceptance gates before
+   claiming the end-user scale target.
 
 ## 2. Goal And Supported Scope
 
@@ -64,16 +137,31 @@ wire-format decision inside the v2 grammar and does not change the public API.
 It is a checksum-byte-order disambiguation within one major version, **not** a
 cross-version grammar retry, and section 8's no-retry rule does not forbid it.
 
-### Planned by the v1 program
+### Delivered by the v1 program
 
 MDict major version 1 `.mdx` and `.mdd` behind the same public API, the same
-shared core, and the same limits. Adding v1 must not change the public API.
+shared core, and the same limits. Adding v1 did not change the public API.
+
+### Added in the `0.2.4` release
+
+A production persistent MDX key-index facility behind additive APIs. mdictlib
+owns normalization, index revisions and bytes, bounded construction, source
+identity, lookup semantics, and validation. The host owns source-location-scoped
+placement, scratch/disk preflight, build scheduling, atomic publication,
+artifact leases, quotas, and garbage collection.
+
+The facility must not construct the existing full locator as a prerequisite,
+must remain version-blind below `ValidatedLayout`, and must preserve the exact
+`RawExact`/`HeaderNormalized`, duplicate, prefix, and physical traversal
+contracts. It uses safe bounded positional reads; mmap is not introduced.
 
 ### Still out of scope
 
 Future-major layouts, writing, HTML/style processing, multi-volume discovery,
-prefix/fuzzy search, resource extraction policy, mmap, and persistent sidecar
-indexes.
+library-owned fuzzy ranking/correction, resource extraction policy, mmap, and
+persistent MDD indexes. Normalized prefix lookup and early-break physical key
+traversal are implemented; completion and edit-distance policy remain with the
+caller.
 
 ## 3. Architecture As Implemented
 
@@ -81,7 +169,8 @@ indexes.
 public root API
   ├── MdxFile / MdxEntry
   ├── MddFile / MddResource / MddResourceSpan
-  ├── KeyEntry / KeyOrdinal / KeyMatches / MatchBasis
+  ├── KeyEntry / KeyOrdinal / KeyMatches / KeyMatchPage / MatchBasis
+  ├── KeyIndex / KeyIndexOptions / source identity, build, rejection, revisions
   ├── Header / OpenOptions / Passcode / Limits / MemoryUsage
   └── Error / Result
             │
@@ -92,7 +181,8 @@ src/core/            version-blind shared core
   ├── records.rs   record descriptors, lazy blocks, span traversal
   ├── iter.rs      shared fused physical iterators
   ├── normalize.rs header-controlled key normalization
-  └── locator.rs   lazy global duplicate-aware locator
+  ├── locator.rs   lazy global duplicate-aware locator
+  └── persistent.rs bounded builder and lazy file-backed index access
             │
             ▼
 src/format/mod.rs    common header, WireVersion, the only version match
@@ -109,6 +199,7 @@ src/format/v1/   src/format/v2/
 src/format/common/   descriptors, header, cursor, checked, encoding,
                      compression, checksum, crypto, source
 private cross-cutting module: limits.rs
+public index values and policy: index.rs
 ```
 
 Dependency rules, all enforced by `tests/architecture.rs`:
@@ -120,6 +211,8 @@ Dependency rules, all enforced by `tests/architecture.rs`:
 - the parsing path uses no trait-object dispatch and no version conversion;
 - MDX and MDD share key, locator, record-descriptor, cache, and budget paths;
 - normalization is lookup policy, not text encoding;
+- persistent MDX indexing consumes only the version-blind `MdictFile` and
+  `ValidatedLayout`; it does not introduce a second grammar or a version branch;
 - concrete iterators, parser/index types, codecs, sources, and caches stay
   private;
 - the separate fuzz crate reaches only narrow doc-hidden adapters under
@@ -158,6 +251,13 @@ common header
 
 `WireVersion` is a private enum in `src/format/mod.rs`. `src/format/mod.rs` is
 the only file in the crate that contains a `match` on it.
+
+The generated version is resolved before `RequiredEngineVersion` is examined,
+so an unsupported generated grammar takes precedence over malformed
+compatibility metadata. Every dot-separated component of both attributes must
+be a non-empty ASCII decimal integer; only the generated major component
+selects the grammar. Each `parse_layout` receives the same `LayoutRequest`, and
+any grammar error propagates without trying another version.
 
 ### 4.2 Physical module layout
 
@@ -303,7 +403,7 @@ This is concrete function-pointer dispatch: monomorphic, non-capturing, no
   exact-length and checksum rules apply identically. If a v1 file proves to use
   a different envelope, that is a finding for section 8.3, not a fallback.
 
-## 5. Public API Contract (unchanged by the v1 program)
+## 5. Public API Contract (unchanged at the v1 cutover)
 
 ### Physical identity
 
@@ -322,11 +422,40 @@ snapshot.
 4. `lookup()` and `lookup_span()` select the lowest matching ordinal and then
    use the same ordinal route as direct access.
 
+The additive `MdxFile::locate_page()` and `MddFile::locate_page()` APIs accept
+an offset and limit and return `KeyMatchPage`: global basis and exact total are
+preserved, but only the requested ascending physical ordinals are retained.
+An offset at or beyond the total returns an empty `Some` page rather than a
+query miss.
+
+The in-memory locator retains normalized text in one shared arena, plus row
+bounds, normalized ordering, and raw-text digests. It does not retain a second
+raw-text copy per row. Raw equality implies normalized equality, so all raw
+candidates lie inside the normalized equal range. Digests filter that range;
+source key blocks prove each digest hit. The text arena uses amortized growth to
+avoid reallocating all preceding keys for every appended key. Paging resolves
+raw-exact precedence across the entire range before returning a window.
+
 Known logical header attributes are resolved ASCII-case-insensitively while
 raw spellings remain inspectable. Semantically equivalent aliases are accepted
-and conflicting aliases are rejected. When `StripKey` is enabled, comparison
-removes non-alphanumeric ASCII code points and leaves non-ASCII characters
-unchanged; case folding remains controlled separately by the header.
+and conflicting aliases are rejected. Both XML attribute quote styles and
+both cases of hexadecimal numeric entities are accepted, but content after the
+one top-level header element is rejected; a matching empty closing tag remains
+compatible. When `KeyCaseSensitive` is omitted,
+supported MDD files default to case-sensitive resource paths while MDX keeps
+its historical case-insensitive default; explicit values override either
+default. This follows the sibling `mdx` metadata default; reader-specific MDD
+sort-key folding remains a separate compatibility question. When `StripKey` is
+enabled, comparison removes non-alphanumeric ASCII
+code points and leaves non-ASCII characters unchanged; case folding remains
+controlled separately by the header.
+MDD lookup also treats an optional leading separator and `/` versus `\\` as
+equivalent resource-path spelling, keeping that compatibility behavior in the
+shared normalizer rather than in an application adapter.
+`GeneratedByEngineVersion` remains the sole grammar-dispatch authority;
+`RequiredEngineVersion` is validated independently for complete numeric
+spelling, supported major range, and the v1-generated/v2-required conflict,
+but never selects a grammar.
 
 ### MDX
 
@@ -337,6 +466,98 @@ locate / lookup / entry_at / entries
 ```
 
 Every `MdxEntry` contains its physical key row and decoded text.
+
+### Persistent MDX key index
+
+The additive root API is:
+
+```text
+KeyIndexOptions / KeyIndexSourceIdentity / KeyIndexBuild / KeyIndex
+KeyIndexRejection
+KEY_INDEX_FORMAT_REVISION / KEY_INDEX_PARSER_REVISION
+KEY_INDEX_NORMALIZATION_REVISION / KEY_INDEX_REVISION
+
+MdxFile::key_index_source_identity
+MdxFile::build_key_index / build_key_index_to_path
+MdxFile::open_key_index
+MdxFile::locate_with_key_index / locate_page_with_key_index
+MdxFile::prefix_keys_with_index
+MdxFile::scan_normalized_keys_with_index
+```
+
+`KEY_INDEX_REVISION` is a filesystem-safe aggregate of independent format,
+parser/layout, and normalization revisions. `KeyIndexSourceIdentity` contains
+source length, filesystem modification time, and physical key count read from
+the already-open parser `FileSource` without scanning contents. The host must
+namespace local artifacts by stable source location plus this revision and use
+the metadata identity only as that location's freshness stamp. It is neither a
+content hash nor a cross-path deduplication identity.
+
+The binary format is little-endian and contains:
+
+- fixed magic, endian marker, format revision, header length, and total length;
+- parser/layout and normalization revisions plus checksum chunk length;
+- the metadata source identity and normalized-text length;
+- four checked, eight-byte-aligned `u64` section descriptors;
+- normalized UTF-8 text and `u64` bounds in physical row order;
+- one `u32` raw-text digest per physical row;
+- one `u32` physical ordinal per row sorted by normalized text then ordinal;
+- a header checksum and a contiguous checksum directory for every
+  section chunk.
+
+The normal loader reads a 24-byte prefix plus the fixed 224-byte header,
+validates the metadata identity and complete checked section geometry, and
+keeps one file handle plus bounded caches. It does not eagerly read the
+checksum directory or any data section. The expected checksum is loaded through
+one lazy 4 KiB page; every row is interpreted from the exact verified section
+bytes and validates local bounds/UTF-8. Runtime sidecar reads are serialized per
+index. Header, checksum-page, chunk, and returned-byte memory is charged to the
+originating dictionary budget. Adler-32 reduces its accumulators once per
+5,552-byte block rather than once per byte; this preserves the format checksum
+while avoiding a modulo operation in the key/record decode hot path. The
+bounded section cache still permits a random query to re-read and re-check a
+chunk after another chunk replaces it.
+
+Construction streams physical text/bounds/digests through bounded scratch
+write buffers and appends normalized bytes to one arena with offset records.
+A one-batch sort writes order directly. External merge uses bounded per-run read
+buffers, reuses popped key allocations, and writes its final pass directly to
+order instead of serializing and rereading one last run. The final destination
+requires `Write + Seek` and is written without any readback. The path API uses
+create-new semantics, flushes, and syncs; the host builds a unique partial in
+the destination filesystem and performs its own atomic rename. A final metadata
+check detects an observed source change. No builder call initializes the old
+process-lifetime `KeyLocator`.
+
+Exact lookup binary-searches the normalized-order ordinal section, expands the
+complete equal range, tests raw digests only as filters, and reads source key
+blocks to prove every candidate. A raw collision can add a source probe but can
+never establish equality. With no raw hit, every normalized candidate is also
+checked against the source. The equal-range ordinal set is materialized only
+once, bounded by `Limits::locator_bytes`, and charged to aggregate working
+memory for the lifetime of `KeyMatches`. Prefix positives receive the same
+source-row check; physical scan reads physical text order directly. All duplicates
+retain ascending physical ordinal within an equal normalized range.
+
+Paged lookup performs the same complete-range raw classification and source
+checks but retains and charges only `min(limit, total - offset)` ordinals. The
+complete scan per independent call is the tight correctness boundary: without
+it, a raw-exact row outside the requested window could be overlooked and a
+normalized page returned under the wrong basis. Hosts doing sequential display
+pagination should cache a bounded page. Persistent physical scan verifies the
+current source key's normalized text and raw digest before each visitor call;
+same-layout source mutation is a structured `SourceKeyMismatch`.
+
+Malformed, truncated, corrupt, stale, incompatible, or source-mismatched
+artifacts report `Error::KeyIndexRejected(KeyIndexRejection)` without changing
+MDX readability. Chunk checksums are unkeyed corruption detection, not
+authentication; source metadata can likewise be spoofed. The artifact is a
+local rebuildable cache, while every positive or visited result is lazily
+checked against its source row. Every readable encrypted MDX follows the
+ordinary index path even though the
+derivative exposes plaintext headwords; mdictlib has no policy gate and the
+host owns storage policy. Passcode-protected sources must open before indexing.
+MDD persistent indexing remains evidence-gated.
 
 ### MDD
 
@@ -355,12 +576,21 @@ each decoded block remains bounded.
 
 - `OpenOptions` is reusable by reference and owns a `Limits` policy;
 - all public limit builders are wired to parser boundaries;
+- `Limits::new()` is finite; `Limits::large_dictionary()` is an explicit,
+  finite high-headroom preset measured against the 4,362,467-entry TLD sample;
+  aggregate multi-file budgets remain an application responsibility;
 - `MemoryUsage` reports conservative accounted current/peak, metadata,
   locator, and cache estimates;
 - `Passcode::new()` validates borrowed input before cloning, bounds the user
   identity, uses fallible allocation, and redacts `Debug`;
 - `Header` exposes semantic getters plus exact raw attribute iteration;
-- public payload debug output reports lengths rather than dumping content.
+- public payload debug output reports lengths rather than dumping content;
+- `KeyIndexOptions` separately bounds artifact/metadata/chunk sizes and external
+  sort memory and selects scratch placement. Build-only sort buffers, scratch
+  files, artifact disk bytes, and host-wide handle/job budgets remain outside
+  per-open parser `MemoryUsage`; an open `KeyIndex`'s checksum-page cache,
+  verified chunk cache, and transient reads are included in its
+  dictionary's accounted current/peak memory.
 
 ## 6. Defensive Invariants
 
@@ -384,6 +614,12 @@ release enforces:
 - lazy descriptor/span validation separate from materialization limits;
 - serialized cache misses and locator construction so successful concurrent
   first access performs one retained build;
+- persistent-index checked header/section arithmetic, bounded external-sort
+  batches and merge fan-in, shared normalized-key arenas, create-new path
+  output, fixed-cost open, lazy checksum-page and section-chunk verification,
+  source-row validation on use, and structured rejection;
+- same-handle length/mtime observation before and after construction, with host
+  source-location namespacing and no claim of content authentication;
 - iterator error fusion after descriptor or payload failures;
 - no `unsafe` code.
 
@@ -402,6 +638,7 @@ requires that every v1-specific rejection reuse an existing `Error` variant.
 | 4. Complete shared locator | complete | Lazy budgeted global locator shared by MDX/MDD; exhaustive corpus raw queries and duplicate ordinals pass |
 | 5. Generic-v2 conformance | complete | Full synthetic MDX/MDD files for all encodings, none/zlib/LZO, both encryption modes, corruption, tight limits, concurrent first lookup, seven fuzz targets, multi-OS CI definition |
 | 6. Performance and release audit | complete | Versioned private-manifest evidence, locator/warm lookup/full scan/ordinal/stream/materialize/concurrency/RSS measurements, docs and package gates |
+| 7. Persistent MDX key index | implementation complete; release pending | Additive `0.2.4` API, path-scoped metadata identity, bounded cancellable arena/direct/external sort, write-only final publication input, fixed-cost open, lazily checksummed positional access, O(page) retained match windows, source-verified positives/scans, synthetic equivalence/corruption/staleness/collision/large-duplicate tests, and 158,987-row, 137,212-row, plus 4,362,467-row Windows construction measurements; cross-platform large-corpus performance evidence remains pending |
 
 The active all-feature suite contains complete synthetic dictionaries rather
 than only primitive parser tests. LZO evidence includes whole files covering
@@ -445,14 +682,23 @@ These rules are absolute and apply to every milestone below.
    keyword-index checksum disambiguation in section 2 is inside one major
    version and is unaffected.)
 7. **No permissive parsing.** No brute-force parsing, no grammar retries, no
-   silent checksum bypasses, no heuristic encoding changes, no lossy fallback.
-   An unresolved artifact stays classified as unresolved.
+   heuristic encoding changes, no lossy fallback. The explicit default
+   `ChecksumPolicy::Skip` only bypasses optional checksum comparisons; it does
+   not bypass geometry, decompression, complete-stream, or structural parsing.
+   `ChecksumPolicy::Verify` retains fail-closed checksum errors. An unresolved
+   artifact stays classified as unresolved.
 8. **Conversion and writer tools stay outside the library.** Any converter or
    writer built during this program is a separately reviewed diagnostic or test
    oracle. It is never linked into the published crate and never called by
    parser code.
 
 ### 8.2 Source, license, and provenance matrix
+
+> Historical planning record: sections 8.2 through 8.4 preserve the dated pre-implementation v1
+> evidence and milestone instructions. Their future tense and “none/not reproduced/not exercised”
+> labels describe that baseline, not current status. Current outcomes are recorded in sections 8.5
+> and 8.6 and in `.codex/STATUS.md`; all seven milestones completed, including validation of 16 real
+> v1 MDD artifacts.
 
 Lineage classes: **A** = Python `mdict-analysis` family, **B** = GoldenDict C++
 family, **C** = JavaScript family, **D** = Java, **E** = Rust, **W** = writer.
@@ -467,7 +713,7 @@ Independence means "different lineage class", not "different repository".
 | `binhetech/mdict-parser` | `257885176aa572953b044e9ff68b88fecc86cdf9` | `../mdict-v1-references/mdict-parser` | `readmdict.py` carries a GPLv3 header; appears to be another `readmdict` copy | A | MDX + MDD | clean-room behavioral only; **not** independent confirmation |
 | `lengyijun/mdict-cli-rs` | `1df631794440d2837fbfb9f81e47d85077074386` | `../mdict-v1-references/mdict-cli-rs` | **no `LICENSE` file in tree and no README license statement** | none — contains no parser; `src/mdict_wrapper.rs` delegates to the crates.io `mdict` 0.1 crate | n/a | **excluded.** Not a reader lineage. Present locally but unplanned; do not use for behavioral research until its license and the `mdict` crate's lineage are separately reviewed |
 
-#### To clone and pin during milestone 1
+#### Original milestone 1 clone list (completed)
 
 | Project | Revision | License facts | Lineage | Claimed MDX/MDD | Use |
 | --- | --- | --- | --- | --- | --- |
@@ -533,9 +779,9 @@ verified):
 | advertised bytes | 47,594,522,494 |
 | exact-stem MDD candidates paired with a v1 MDX row | 16 |
 | advertised bytes of those 16 | 59,842,819 |
-| authorized, acquired, or version-inspected | **none** |
+| authorized, acquired, or version-inspected at this baseline | **none**; 16 were later acquired and validated (section 8.5) |
 
-#### Carried forward without a tracked artifact — must be re-derived
+#### Historical carry-forward state (subsequently re-derived)
 
 | Claim | Status |
 | --- | --- |
@@ -551,10 +797,10 @@ verified):
 None of the above has decoded a single LZO payload, key, checksum, ordinal,
 duplicate, or record. All of it is geometry.
 
-#### Hypotheses — reader consensus, not yet exercised
+#### Historical hypotheses (subsequently exercised)
 
-Each remains a hypothesis until independently exercised by synthetic fixtures
-(milestone 3) **and** authorized real files (milestone 6).
+At this baseline each remained a hypothesis until independently exercised by synthetic fixtures
+(milestone 3) **and** authorized real files (milestone 6). Section 8.6 records the resulting verdicts.
 
 - v1 numeric fields are unsigned 32-bit big-endian; v2 uses 64-bit.
 - the v1 keyword header is 16 bytes / four `u32` fields: key-block count, entry
@@ -581,34 +827,32 @@ Each remains a hypothesis until independently exercised by synthetic fixtures
 
 #### Open disagreements and unknowns
 
-1. `GeneratedByEngineVersion` versus `RequiredEngineVersion` as the
-   authoritative dispatch attribute. **Regression-critical:** today's
-   `is_v2()` reads `GeneratedByEngineVersion`, and `RequiredEngineVersion`
-   defaults to it when absent. Changing the attribute changes which files are
-   accepted as v2 and can silently move corpus artifacts between classes.
-   Section 9 gates this.
-2. Missing, malformed, conflicting, or unusual version strings.
-3. Missing `Encoding` defaults: readers disagree between UTF-8 and UTF-16LE.
+1. Missing `Encoding` defaults: readers disagree between UTF-8 and UTF-16LE.
    `mdictlib` currently defaults MDX to UTF-8
-   ([`src/format/encoding.rs:21`](../src/format/encoding.rs:21)).
-4. Real versions other than 1.2. All 453 local v1 files declare exactly 1.2, so
+   ([`src/format/common/encoding.rs:21`](../src/format/common/encoding.rs:21)).
+   This remains a separately scoped compatibility decision because changing it
+   changes key and record decoding for files that omit the attribute.
+2. Real versions other than 1.2. All 453 local v1 files declare exactly 1.2, so
    the local corpus provides **no** evidence about 1.0 or 1.1.
-5. Empty v1 sections (zero key blocks, zero record blocks, zero entries).
-6. v1 encryption flags and passcode behavior. All 453 local files declare
+3. Empty v1 sections (zero key blocks, zero record blocks, zero entries).
+4. v1 encryption flags and passcode behavior. All 453 local files declare
    `Encrypted=No`, so the local corpus provides **no** v1 encryption evidence.
-7. Whether key-info encryption exists in real v1 files at all.
-8. Real v1 zlib blocks.
-9. Uncompressed v1 record blocks.
-10. Exact LZO termination, checksum, and trailing-input rules.
-11. Records crossing decoded record-block boundaries in v1.
-12. ISO-8859-1 behavior — 11 local files declare it, and it is **not** in
-    `mdictlib`'s supported encoding set today
-    ([`src/format/encoding.rs:8`](../src/format/encoding.rs:8)), so those
-    files would be rejected as `Unsupported("text encoding")` even with a
-    working v1 grammar. Adding it is a separate scoped decision.
-13. Creator-specific variants and malformed historical files.
+5. Whether key-info encryption exists in real v1 files at all.
+6. Real v1 zlib blocks.
+7. Uncompressed v1 record blocks.
+8. Exact LZO termination, checksum, and trailing-input rules.
+9. Records crossing decoded record-block boundaries in v1.
+10. ISO-8859-1 behavior — 11 local files declare it, and it is **not** in
+   `mdictlib`'s supported encoding set today
+    ([`src/format/common/encoding.rs:8`](../src/format/common/encoding.rs:8)), so those
+   files would be rejected as `Unsupported("text encoding")` even with a
+   working v1 grammar. Adding it is a separate scoped decision.
+11. Creator-specific variants and malformed historical files.
 
-### 8.4 Milestones
+### 8.4 Original milestones (completed)
+
+The imperative text below is retained as the implementation record. Section 8.5 is the current
+completion ledger.
 
 #### Milestone 1 — Evidence matrix
 
@@ -659,7 +903,8 @@ still absent.
 - Re-point `src/fuzzing.rs` and the fuzz targets at the moved module paths.
 
 Exit: every existing v2 test, corpus hash, limit, lazy behavior, and benchmark
-is unchanged (section 9), and a public API diff against `v0.1.0` is empty.
+is unchanged (section 9), and the version-1 cutover public API diff against
+`v0.1.0` is empty. Later additive patch-release APIs are tracked separately.
 
 #### Milestone 3 — Independent synthetic v1 fixtures
 
@@ -730,7 +975,7 @@ authorization.
 | 4. Implement `format::v1` | complete | Only evidence-backed grammar. Encryption and ISO8859-1 refused precisely. |
 | 5. Safety and fuzzing | complete | Ten fuzz targets under AddressSanitizer, including `v1_whole_file`, `v1_truncation`, and `version_dispatch`; mutation and truncation sweeps over whole v1 MDX and MDD files. |
 | 6. Corpus and differential validation | complete | 407 of 453 real artifacts fully validated; 46 rejected with retained classifications; two independent observations agree on all 453. Differential against one independent lineage with zero unexplained disagreements. |
-| 7. MDD validation, documentation, release decision | MDD and docs complete; **`0.2.0` selected** | README, STATUS, this roadmap, `CHANGELOG.md`, and crate rustdoc updated. Crate version is `0.2.0`; publish/tag/push still require authorization. |
+| 7. MDD validation, documentation, release decision | MDD and docs complete; the historical `0.2.0` decision was followed by compatible `0.2.1`/`0.2.2`/`0.2.3` releases | README, STATUS, this roadmap, `CHANGELOG.md`, and crate rustdoc are synchronized; future releases remain subject to maintainer authorization. |
 
 ### 8.6 What was learned that changed the plan
 
@@ -786,7 +1031,7 @@ All are enforced by `tests/architecture.rs` and **pass**.
 | every accepted v1 artifact completes ordinal, raw-lookup, duplicate, and payload validation | pass — 407 of 453 |
 | every rejected artifact has a structured retained classification | pass — 46 of 46 |
 | malformed input cannot panic or bypass limits | pass — mutation and truncation sweeps plus ten AddressSanitizer fuzz targets |
-| public API diff against `v0.1.0` is empty | pass — 126 items identical |
+| public API diff at the version 1 cutover is empty | pass — 126 items identical; later `0.2.2` scan/completion methods, the `0.2.3` large-limit preset, and the `0.2.4` persistent-index release are compatible additions |
 | benchmark baseline within its 2x diagnostic threshold | **not re-measured**; the checked-in baseline predates this work |
 | real v1 MDD validation | pass — 16 of 16 acquired artifacts fully validated |
 
@@ -805,8 +1050,11 @@ The original gate list, for reference:
   payload or MDD span/stream validation.
 - Every rejected artifact has a structured retained classification.
 - Malformed input cannot panic or bypass limits.
-- No public API change unless separately approved under the `0.x` policy; a
-  public API diff against `v0.1.0` must be empty.
+- No breaking public API change unless separately approved under the `0.x`
+  policy; compatible additive APIs are recorded in the changelog and must not
+  alter the version-1 cutover contract. The current Required-version checks
+  centralize the AALookup adapter's former preflight policy; they do not change
+  which grammar `GeneratedByEngineVersion` selects.
 
 ### Gated decisions
 
@@ -814,9 +1062,12 @@ Two decisions may change which files `mdictlib` accepts and must not be made as
 a side effect of refactoring:
 
 1. **Dispatch attribute.** Any change from `GeneratedByEngineVersion` to
-   `RequiredEngineVersion`, or to a combination, requires re-running the
-   exhaustive corpus audit and comparing the full outcome ledger before and
-   after. A change in any artifact's class blocks the change until reviewed.
+   `RequiredEngineVersion`, or any future change that lets the requirement
+   select a grammar, requires re-running the exhaustive corpus audit and
+   comparing the full outcome ledger before and after. The current parser only
+   centralizes the adapter's pre-existing malformed/future/conflict checks;
+   it never lets the requirement select a grammar. A change in any artifact's
+   class still blocks a future dispatch change until reviewed.
 2. **ISO-8859-1 support.** Adding it changes the supported-encoding set and
    affects 11 local v1 files. It is a separate scoped decision with its own
    fixtures, not part of milestone 4.
@@ -937,13 +1188,13 @@ completed the full audit. Exhaustive duplicate checking was changed to validate
 each complete duplicate group once and use logarithmic membership probes, with
 a dedicated large noncontiguous-duplicate regression.
 
-**MDD evidence gap.** No MDD file is present in the reviewed local selection.
-The tracked inventory holds 335 discovery-only MDD URLs, of which 16 are
-exact-stem candidates paired with v1 MDX rows totaling 59,842,819 advertised
-bytes. They are not authorized, acquired, or version-inspected. A separate
-explicit local-testing and license review must precede acquisition. Until it
-happens, every v1 MDD claim in this roadmap rests on synthetic fixtures and
-reader behavior alone.
+**MDD evidence status.** The initial reviewed selection contained no MDD
+payloads. A subsequent, explicitly approved local-testing and license review
+acquired 16 exact-stem candidates under the bounded workflow described above;
+all 16 were version-inspected and passed the real-file audit (14 declared
+version 1.2 and 2 declared version 2.0). The remaining 335 inventory rows are
+discovery-only and are not parser evidence. This narrow sample does not
+generalize to every MDD producer or extension variant.
 
 CI covers schemas, deterministic transformations, bounded local acquisition
 fixtures, manifest parsing, isolated-runner failure handling, and synthetic
@@ -1002,13 +1253,19 @@ deferred to the transition.
 
 - future-major layouts beyond version 1 and version 2;
 - ISO-8859-1 text decoding, until separately scoped (section 9);
-- mmap, persistent sidecars, larger/LRU caches, async I/O, or parallel
-  decompression until profiling justifies them;
+- mmap, persistent MDD sidecars, larger/LRU caches, async I/O, or parallel
+  decompression until profiling justifies them; the shipped MDX index uses safe
+  bounded positional reads and makes no zero-residency claim;
 - writer support in the published crate, compact-text rewriting, stylesheet
   expansion, HTML/JS/CSS interpretation, filesystem extraction, and
   multi-volume discovery policy — v1 fixture encoders and any diagnostic
   converter are test-only and never linked into the library;
-- prefix, completion, fuzzy search, redirects, and duplicate-record merging;
+- library-owned completion ranking, fuzzy ranking/correction, redirect
+  resolution, and duplicate-record merging. Normalized prefix lookup and
+  early-break normalized-key traversal are implemented by `prefix_keys` and
+  `scan_normalized_keys`, with persistent-index equivalents; callers own the
+  completion/edit-distance policy and its work, deadline, and cancellation
+  budgets;
 - host application integration, UI/resource ordering, and rollout policy.
 
 Update this roadmap and `.codex/STATUS.md` whenever architecture, API, scope,

@@ -175,6 +175,43 @@ pub(crate) fn try_reserve_string(
         .map_err(|_| Error::AllocationFailed { context, requested })
 }
 
+/// Reserves with amortized growth, for a buffer appended to many times.
+///
+/// The exact variants above are right when the final size is known up front.
+/// Using one of them per appended item instead reallocates the whole buffer
+/// every time, which is quadratic over a multi-million-entry file.
+pub(crate) fn try_reserve_string_amortized(
+    value: &mut String,
+    additional: usize,
+    context: &'static str,
+) -> Result<()> {
+    let requested = value
+        .len()
+        .checked_add(additional)
+        .and_then(|bytes| u64::try_from(bytes).ok())
+        .unwrap_or(u64::MAX);
+    value
+        .try_reserve(additional)
+        .map_err(|_| Error::AllocationFailed { context, requested })
+}
+
+/// The [`try_reserve_string_amortized`] counterpart for a growing vector.
+pub(crate) fn try_reserve_vec_amortized<T>(
+    values: &mut Vec<T>,
+    additional: usize,
+    context: &'static str,
+) -> Result<()> {
+    let requested = values
+        .len()
+        .checked_add(additional)
+        .and_then(|count| count.checked_mul(mem::size_of::<T>()))
+        .and_then(|bytes| u64::try_from(bytes).ok())
+        .unwrap_or(u64::MAX);
+    values
+        .try_reserve(additional)
+        .map_err(|_| Error::AllocationFailed { context, requested })
+}
+
 pub(crate) fn try_clone_string(value: &str, context: &'static str) -> Result<String> {
     let mut output = String::new();
     try_reserve_string(&mut output, value.len(), context)?;
