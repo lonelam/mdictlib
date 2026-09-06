@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::error::{Error, Result};
+use crate::format::common::file_url;
 use crate::limits::{checked_u64, try_reserve_vec};
 
 pub struct FileSource {
@@ -22,8 +23,10 @@ impl std::fmt::Debug for FileSource {
 }
 
 impl FileSource {
+    /// Opens a dictionary file, accepting either a path or the `file://` URL a
+    /// mobile file picker answers with (see [`file_url::resolve`]).
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
+        let path = &file_url::resolve(path.as_ref())?;
         let file = File::open(path)?;
         let len = file.metadata()?.len();
         if len == 0 {

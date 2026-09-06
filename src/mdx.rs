@@ -75,11 +75,16 @@ impl MdxEntry {
 impl MdxFile {
     /// Opens an MDX file with default options.
     ///
+    /// The path may also be a `file://` URL, which is what a mobile file
+    /// picker answers with — iOS hands back `NSURL`s and Android's Storage
+    /// Access Framework does the same — including percent-escaped names. Only
+    /// local URLs are accepted; one naming another host is refused.
+    ///
     /// # Errors
     ///
     /// Returns an error if the file cannot be read, requests an unsupported
     /// format path, exceeds a safety limit, or contains malformed metadata or
-    /// indexes.
+    /// indexes, or if a `file://` URL is remote or malformed.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_options(path, &OpenOptions::new())
     }

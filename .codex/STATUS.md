@@ -25,6 +25,10 @@ Last updated: 2026-08-11 (v0.2.0 selected)
 - Header and block indexes are parsed eagerly under limits; key and record
   blocks are decoded lazily.
 - Unsafe code is forbidden.
+- Every open accepts a `file://` URL as well as a path, because that is how
+  a mobile file picker names a file (`format::common::file_url`). Decoding is
+  dependency-free; remote hosts and malformed escapes are refused rather than
+  guessed at, and a path is never reinterpreted.
 - The public API is byte-for-byte identical to `v0.1.0`.
 - Public corpus metadata and acquisition tooling are tracked separately from
   ignored, locally authorized dictionary bytes under `.corpus/`.

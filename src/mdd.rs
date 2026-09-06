@@ -174,6 +174,9 @@ impl MddResourceSpan {
 impl MddFile {
     /// Opens an MDD file with default options.
     ///
+    /// As with [`MdxFile::open`](crate::MdxFile::open), the path may be a
+    /// `file://` URL from a mobile file picker.
+    ///
     /// # Errors
     ///
     /// Returns an error if the file cannot be read, requests an unsupported

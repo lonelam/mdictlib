@@ -4,6 +4,17 @@ All notable changes are recorded here.
 
 ## [Unreleased]
 
+### Added
+
+- `file://` URLs are accepted wherever a dictionary path is, which is how a
+  mobile file picker names a file: iOS answers its document picker with
+  `NSURL`s and Android's Storage Access Framework does the same, so an
+  application passing that answer through used to fail with a bare "No such
+  file or directory". Percent-escaped names decode, `file://localhost/…` is the
+  same as `file:///…`, and a Windows drive keeps its letter. A URL naming
+  another host is refused with `Error::InvalidData` rather than read as a local
+  path. Paths are untouched, including one that merely contains the text.
+
 ## [0.2.0] - 2026-08-11
 
 ### Added
