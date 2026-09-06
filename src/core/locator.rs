@@ -84,13 +84,14 @@ impl MdictFile {
             .memory
             .reserve(normalized_len, "normalized lookup query")?;
         let normalized = self.normalizer.normalize(query)?;
-        Ok(locator
-            .equal_range(LocatorBasis::HeaderNormalized, &normalized)
-            .map(|range| LocatedKeys {
+        if let Some(range) = locator.equal_range(LocatorBasis::HeaderNormalized, &normalized) {
+            return Ok(Some(LocatedKeys {
                 locator,
                 basis: LocatorBasis::HeaderNormalized,
                 range,
-            }))
+            }));
+        }
+        Ok(None)
     }
 
     fn key_locator(&self) -> Result<Arc<KeyLocator>> {
