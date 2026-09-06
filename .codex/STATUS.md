@@ -1,12 +1,11 @@
 # mdictlib Status
 
-Last updated: 2026-09-07 (v0.2.6 release candidate; v0.2.5 published)
+Last updated: 2026-09-07 (v0.2.6 published)
 
 ## Current Snapshot
 
-- `mdictlib` `0.2.6` is the current source/package candidate; `0.2.5` is the
-  current crates.io release. The crate supports MDict major versions 1 and 2
-  for MDX and MDD.
+- `mdictlib` `0.2.6` is the current crates.io release. The crate supports MDict
+  major versions 1 and 2 for MDX and MDD.
 - Version 1 support is implemented, tested against independent synthetic
   fixtures, fuzzed, and validated against 453 authorized real v1.2 MDX
   artifacts. **407 of 453 complete full validation**; every rejected artifact
@@ -21,8 +20,8 @@ Last updated: 2026-09-07 (v0.2.6 release candidate; v0.2.5 published)
   ignored cache and all 16 passed full validation, 14 of them declaring
   version 1.2.
 - The canonical repository is `https://github.com/lonelam/mdictlib`; the
-  repository release tags include `v0.1.0` and `v0.2.5`, and `0.2.5` is
-  published through crates.io.
+  repository release tags include `v0.1.0`, `v0.2.5`, and `v0.2.6`, and `0.2.6`
+  is published through crates.io.
 - Rust is pinned to `1.97.1`; MSRV is `1.97`, edition 2024.
 - MDX and MDD, and both wire versions, use one defensive, file-backed parser
   core. The wire version is resolved once during open and never reaches lookup,
@@ -845,24 +844,25 @@ baselines the v1 program must not regress.
 ## Release Hygiene
 
 - `.github/workflows/ci.yml` exists.
-- `CHANGELOG.md` records `0.1.0` through the published `0.2.5` release.
+- `CHANGELOG.md` records `0.1.0` through the published `0.2.6` release.
 - `README.md`, crate rustdoc, examples, public API tests, and package metadata
-  describe the same published `0.2.5` source API.
+  describe the same published `0.2.6` source API.
 - `Cargo.toml` has `autobins = false` and a deliberate package include list.
 - Private corpus bytes, private manifests, temporary files, benchmark raw
   output, and `draft/` are not packaged.
 - Repository-maintenance corpus inventory/schema/lock metadata and Node
   acquisition tooling are also excluded from the runtime library package; the
   packaged README links their canonical GitHub paths.
-- The `v0.1.0` and `v0.2.5` tags identify exact published package sources.
+- The `v0.1.0`, `v0.2.5`, and `v0.2.6` tags identify exact published package
+  sources.
 
 ## Release State
 
 - Source: `https://github.com/lonelam/mdictlib`
-- Tag: `https://github.com/lonelam/mdictlib/tree/v0.2.5`
-- Package: `https://crates.io/crates/mdictlib/0.2.5`
+- Tag: `https://github.com/lonelam/mdictlib/tree/v0.2.6`
+- Package: `https://crates.io/crates/mdictlib/0.2.6`
 
-`0.2.5` is published on crates.io and tagged as `v0.2.5`.
+`0.2.6` is published on crates.io and tagged as `v0.2.6`.
 
 ## Active TODOs
 
@@ -880,7 +880,7 @@ baselines the v1 program must not regress.
    authorized multi-platform corpus, including cold/warm positional reads and
    host-level handle residency, before assigning cross-machine expectations.
 6. Move AALookup and its dictionary-scale harness from the adjacent-checkout
-   bridge to the registry `0.2.5` dependency, update
+   bridge to the registry `0.2.6` dependency, update
    their lockfiles and parser-boundary assertion together, and keep the default
    integration free of Cargo-feature and environment-`cfg` gates.
 

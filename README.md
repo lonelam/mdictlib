@@ -92,9 +92,8 @@ Enable LZO when required by a dictionary:
 mdictlib = { version = "0.2.6", features = ["lzo"] }
 ```
 
-`0.2.5` is the published crates.io release. `0.2.6` accepts a `file://` URL
-wherever a dictionary path is accepted, which is how a mobile file picker names
-a file.
+`0.2.6` is the published crates.io release. It accepts a `file://` URL wherever
+a dictionary path is accepted, which is how a mobile file picker names a file.
 
 ## MDX
 
