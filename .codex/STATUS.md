@@ -1,19 +1,19 @@
 # mdictlib Status
 
-Last updated: 2026-09-05 (v0.2.5 published)
+Last updated: 2026-09-07 (v0.2.6 release candidate; v0.2.5 published)
 
 ## Current Snapshot
 
-- `mdictlib` `0.2.5` is the current crates.io release. The crate supports MDict
-  major versions 1 and
-  2 for MDX and MDD.
+- `mdictlib` `0.2.6` is the current source/package candidate; `0.2.5` is the
+  current crates.io release. The crate supports MDict major versions 1 and 2
+  for MDX and MDD.
 - Version 1 support is implemented, tested against independent synthetic
   fixtures, fuzzed, and validated against 453 authorized real v1.2 MDX
   artifacts. **407 of 453 complete full validation**; every rejected artifact
   carries a structured retained classification.
 - The compatible persistent MDX key-index facility and explicit checksum policy
   are implemented and released in `0.2.5`.
-- AALookup integration has started against this adjacent `0.2.5` checkout: its
+- AALookup integration has started against this adjacent `0.2.6` checkout: its
   normal build now compiles the persistent-index API by default, without a
   Cargo feature or build-script environment `cfg` gate. This local path is an
   integration bridge, not a published dependency or release cutover.
@@ -37,8 +37,8 @@ Last updated: 2026-09-05 (v0.2.5 published)
 - The version 1 refactor preserved the `v0.1.0` API. Version `0.2.2` later
   added compatible `MdxFile` scan/completion methods, `0.2.3` added the
   compatible `Limits::large_dictionary()` constructor plus compatibility
-fixes, and the `0.2.4` release adds persistent MDX indexing without
-  changing existing methods.
+  fixes, the `0.2.4` release added persistent MDX indexing, and `0.2.6` accepts
+  `file://` URLs as dictionary input, all without changing existing methods.
 - Public corpus metadata and acquisition tooling are tracked separately from
   ignored, locally authorized dictionary bytes under `.corpus/`.
 

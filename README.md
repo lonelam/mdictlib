@@ -82,19 +82,19 @@ fuzzy search, mmap, and persistent MDD sidecars are out of scope.
 
 ```toml
 [dependencies]
-mdictlib = "0.2.5"
+mdictlib = "0.2.6"
 ```
 
 Enable LZO when required by a dictionary:
 
 ```toml
 [dependencies]
-mdictlib = { version = "0.2.5", features = ["lzo"] }
+mdictlib = { version = "0.2.6", features = ["lzo"] }
 ```
 
-`0.2.4` is the published crates.io release. `0.2.5` adds explicit
-`ChecksumPolicy` controls and defaults source and persistent-index checksum work
-to `Skip`.
+`0.2.5` is the published crates.io release. `0.2.6` accepts a `file://` URL
+wherever a dictionary path is accepted, which is how a mobile file picker names
+a file.
 
 ## MDX
 

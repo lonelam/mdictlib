@@ -1,6 +1,6 @@
 # mdictlib Implementation Roadmap
 
-Last updated: 2026-09-05 (v0.2.5 published)
+Last updated: 2026-09-07 (v0.2.6 release candidate; v0.2.5 published)
 
 ## 1. Release State And Active Program
 
@@ -8,10 +8,11 @@ Last updated: 2026-09-05 (v0.2.5 published)
 2 only. Every milestone in the released roadmap (sections 6 and 10) is complete.
 
 The **MDict version 1 compatibility program is implemented**. Milestones 1
-through 6 are complete, and its `0.2.0` release decision is historical. Crate
-metadata and crates.io are now at released **`0.2.5`**, which includes the
-explicit checksum policy with `Skip` as the default; the repository exposes the
-`v0.2.5` tag.
+through 6 are complete, and its `0.2.0` release decision is historical.
+crates.io is at released **`0.2.5`**, which includes the explicit checksum
+policy with `Skip` as the default; the repository exposes the `v0.2.5` tag.
+Crate metadata is at the **`0.2.6`** candidate, which accepts `file://` URLs
+wherever a dictionary path is accepted.
 
 Real version 1 MDD evidence is complete: 16 candidates were acquired under an
 explicitly approved bounded proposal and all 16 passed full validation, 14 of

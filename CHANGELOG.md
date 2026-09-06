@@ -4,6 +4,8 @@ All notable changes are recorded here.
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-09-07
+
 ### Added
 
 - `file://` URLs are accepted wherever a dictionary path is, which is how a
@@ -14,6 +16,11 @@ All notable changes are recorded here.
   same as `file:///…`, and a Windows drive keeps its letter. A URL naming
   another host is refused with `Error::InvalidData` rather than read as a local
   path. Paths are untouched, including one that merely contains the text.
+
+### Package
+
+- Bumped the package from `0.2.5` to `0.2.6` for the compatible
+  `file://` URL input accepted wherever a dictionary path is accepted.
 
 ## [0.2.5] - 2026-09-05
 
@@ -305,7 +312,8 @@ digests, and payload digests are unchanged.
   to the library, examples, tests, documentation, and license material.
 - Released version `0.1.0` as the first public release.
 
-[Unreleased]: https://github.com/lonelam/mdictlib/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/lonelam/mdictlib/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/lonelam/mdictlib/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/lonelam/mdictlib/compare/d00d360...v0.2.5
 [0.2.4]: https://github.com/lonelam/mdictlib/compare/31a3e9f...d00d360
 [0.2.3]: https://github.com/lonelam/mdictlib/compare/bc72444...31a3e9f
