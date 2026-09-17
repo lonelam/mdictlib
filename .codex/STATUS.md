@@ -1,6 +1,6 @@
 # mdictlib Status
 
-Last updated: 2026-09-18 (v0.2.7 release candidate; v0.2.6 published)
+Last updated: 2026-09-18 (v0.2.7 published)
 
 ## Current Snapshot
 
@@ -8,7 +8,7 @@ Last updated: 2026-09-18 (v0.2.7 release candidate; v0.2.6 published)
   queries, for both the process locator and persistent indexes. Exact spellings
   precede variants; both groups retain physical order. Existing queries and MDD
   behavior are unchanged. No wire/normalization/index revision changes or rebuilds
-  are required. Publication is explicitly authorized by the maintainer for this task.
+  are required. Published with explicit maintainer authorization.
 - The shared selector reads only source keys in the existing normalized equal
   range. It preserves punctuation and whitespace for case-only comparison,
   honors case-sensitive headers, and uses scalar Unicode lowercase. An empty
@@ -16,7 +16,7 @@ Last updated: 2026-09-18 (v0.2.7 release candidate; v0.2.6 published)
 - Synthetic checks cover both wire versions, both checksum policies, all four
   APIs, duplicate/pagination boundaries, Unicode, punctuation, empty dictionaries,
   lazy record bodies, changed source keys, and bounded large-range memory.
-- `mdictlib` `0.2.6` is the current crates.io release. The crate supports MDict
+- `mdictlib` `0.2.7` is the current crates.io release. The crate supports MDict
   major versions 1 and 2 for MDX and MDD.
 - Version 1 support is implemented, tested against independent synthetic
   fixtures, fuzzed, and validated against 453 authorized real v1.2 MDX
@@ -31,8 +31,8 @@ Last updated: 2026-09-18 (v0.2.7 release candidate; v0.2.6 published)
   ignored cache and all 16 passed full validation, 14 of them declaring
   version 1.2.
 - The canonical repository is `https://github.com/lonelam/mdictlib`; the
-  repository release tags include `v0.1.0`, `v0.2.5`, and `v0.2.6`, and `0.2.6`
-  is published through crates.io.
+  repository release tags include `v0.1.0`, `v0.2.5`, `v0.2.6`, and `v0.2.7`.
+  Version `0.2.7` is published through crates.io.
 - Rust is pinned to `1.97.1`; MSRV is `1.97`, edition 2024.
 - MDX and MDD, and both wire versions, use one defensive, file-backed parser
   core. The wire version is resolved once during open and never reaches lookup,
@@ -140,10 +140,11 @@ version enum in the core, no per-entry branch, and no trait object.
 - `locate()` builds one lazy, budgeted global locator shared by MDX and MDD.
 - `locate_page()` on MDX and MDD reports the same global basis, exact total,
   duplicate identity, and order while retaining only the requested ordinals.
-- Global raw-exact matches always win; header-normalized lookup occurs only
-  after a complete raw miss.
+- Default queries prefer global raw-exact matches; header-normalized lookup
+  occurs only after a complete raw miss.
 - `KeyMatches` reports `MatchBasis` and every duplicate ordinal in ascending
-  physical order.
+  physical order for existing queries. Opt-in case-variant queries place exact
+  spellings first, preserving physical order within both groups.
 - Single-result lookup chooses the lowest physical ordinal and then uses direct
   ordinal access.
 - Known header attributes are ASCII-case-insensitive, semantically equivalent
@@ -179,7 +180,7 @@ version enum in the core, no per-entry branch, and no trait object.
 ### Persistent MDX key indexes
 
 - `KEY_INDEX_REVISION` aggregates independently exposed format,
-  parser/layout, and normalization revisions (`f3-p1-n1` in this candidate).
+  parser/layout, and normalization revisions (`f3-p1-n1`).
 - `key_index_source_identity()` reads source length and filesystem modification
   time from the already-open `FileSource` without scanning contents, and binds
   those values plus the parsed physical key count. Hosts namespace each local
@@ -854,41 +855,54 @@ baselines the v1 program must not regress.
 
 ## 0.2.7 Release Validation (2026-09-18)
 
-- Windows: default and all-feature all-target suites passed; only the three
-  explicit private-corpus suites are ignored. Case-variant, public-API, and
+- Windows: default (233 passed) and all-feature (234 passed) all-target suites
+  passed; only the three explicit private-corpus suites are ignored. Case-variant, public-API, and
   file-URL focused checks passed. Formatting, warning-free all-target/all-feature
   Clippy, doctests, and strict rustdoc passed.
 - Corrected the pre-existing file-URL fixtures to emit valid drive URLs on
   Windows. Production URL parsing is unchanged.
-- The Linux CI quality job remains the gate for Node corpus tooling and fuzzing.
+- The Linux CI quality job passed Node corpus tooling and fuzzing.
   Local Windows Node 22.17.1 and 24.19.0 both pass 44 of 46 corpus tests; two
   symlink-path tests fail with Windows `lstat UNKNOWN` before the asserted
   rejection. The corpus scripts are unchanged and are not packaged in the crate.
-- Package verification, real CROWN/ODE checks, and cross-platform CI are pending
-  before publication.
+- CROWN `make` returned `[41057, 41058, 41056]` in expanded mode and the
+  original `[41057, 41058]` through unchanged queries. `Make`/`MAKE` and every
+  one-row page agreed between both backends. ODE `us`/`US` and `it`/`IT` kept
+  exact spelling first. Both dictionaries reused indexes built by registry
+  `0.2.6`; no rebuild or locator allocation occurred in indexed queries.
+- Local offline packaging and extracted-package all-feature/all-target tests
+  passed (234 passed, three explicitly ignored private-corpus tests). The package
+  contains no MDX/MDD payloads or private index artifacts.
+- CI run https://github.com/lonelam/mdictlib/actions/runs/35287011857 passed
+  Windows/macOS/Linux default and all-feature tests, Node tooling, formatting,
+  Clippy, strict docs, all seven bounded sanitizer fuzz smoke campaigns, offline
+  packaging, and extracted-package tests at source commit `10a804c`.
+- `cargo publish --locked` succeeded; `v0.2.7` tags that tested source commit,
+  and the GitHub release is published. An independent downstream probe downloaded
+  registry `0.2.7` and passed the CROWN expanded/default-query assertions.
 
 ## Release Hygiene
 
 - `.github/workflows/ci.yml` exists.
-- `CHANGELOG.md` records `0.1.0` through the published `0.2.6` release.
+- `CHANGELOG.md` records `0.1.0` through the published `0.2.7` release.
 - `README.md`, crate rustdoc, examples, public API tests, and package metadata
-  describe the same published `0.2.6` source API.
+  describe the same published `0.2.7` source API.
 - `Cargo.toml` has `autobins = false` and a deliberate package include list.
 - Private corpus bytes, private manifests, temporary files, benchmark raw
   output, and `draft/` are not packaged.
 - Repository-maintenance corpus inventory/schema/lock metadata and Node
   acquisition tooling are also excluded from the runtime library package; the
   packaged README links their canonical GitHub paths.
-- The `v0.1.0`, `v0.2.5`, and `v0.2.6` tags identify exact published package
-  sources.
+- The `v0.1.0`, `v0.2.5`, `v0.2.6`, and `v0.2.7` tags identify exact published
+  package sources.
 
 ## Release State
 
 - Source: `https://github.com/lonelam/mdictlib`
-- Tag: `https://github.com/lonelam/mdictlib/tree/v0.2.6`
-- Package: `https://crates.io/crates/mdictlib/0.2.6`
+- Tag: `https://github.com/lonelam/mdictlib/tree/v0.2.7`
+- Package: `https://crates.io/crates/mdictlib/0.2.7`
 
-`0.2.6` is published on crates.io and tagged as `v0.2.6`.
+`0.2.7` is published on crates.io and tagged as `v0.2.7`.
 
 ## Active TODOs
 
