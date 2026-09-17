@@ -1,3 +1,4 @@
+mod case_variants;
 mod iter;
 mod keys;
 mod locator;

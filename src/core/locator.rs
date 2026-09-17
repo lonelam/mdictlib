@@ -38,6 +38,7 @@ impl std::fmt::Debug for KeyLocator {
 pub(crate) enum LocatorBasis {
     RawExact,
     HeaderNormalized,
+    CaseVariants,
 }
 
 #[derive(Debug, Clone)]
@@ -112,6 +113,14 @@ impl LocatedKeys {
 }
 
 impl LocatedKeyPage {
+    pub(crate) fn into_matches(self) -> Option<LocatedKeys> {
+        LocatedKeys::from_owned_with_reservation(
+            self.basis,
+            self.ordinals.into_vec(),
+            self._reservation,
+        )
+    }
+
     pub(crate) fn from_owned_with_reservation(
         basis: LocatorBasis,
         total: usize,
@@ -152,6 +161,36 @@ impl LocatedKeyPage {
 }
 
 impl MdictFile {
+    pub(crate) fn locate_case_variants(
+        &self,
+        query: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Option<LocatedKeyPage>> {
+        let locator = self.key_locator()?;
+        let normalized_len = self.normalizer.normalized_len(query)?;
+        ensure_usize_limit(
+            "normalized_query_bytes",
+            normalized_len,
+            self.limits.locator_bytes,
+        )?;
+        let _query_memory = self.memory.reserve(normalized_len, "case-variant query")?;
+        let normalized = self.normalizer.normalize(query)?;
+        let Some(range) = locator.equal_range(&normalized) else {
+            return Ok(None);
+        };
+        super::case_variants::select_page(self, query, range.len(), offset, limit, |position| {
+            let ordinal = *locator
+                .order
+                .get(range.start + position)
+                .ok_or(Error::InvalidFormat("case-variant range escaped locator"))?;
+            let key = self
+                .key_at_ordinal(KeyOrdinal::new(u64::from(ordinal)))?
+                .ok_or(Error::InvalidFormat("case-variant row has no source key"))?;
+            Ok((ordinal, key))
+        })
+    }
+
     pub(crate) fn locate_keys(&self, query: &str) -> Result<Option<LocatedKeys>> {
         let locator = self.key_locator()?;
 

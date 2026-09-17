@@ -7,8 +7,8 @@ use mdictlib::{
     ChecksumPolicy, Header, KEY_INDEX_FORMAT_REVISION, KEY_INDEX_NORMALIZATION_REVISION,
     KEY_INDEX_PARSER_REVISION, KEY_INDEX_REVISION, KeyEntry, KeyIndex, KeyIndexBuild,
     KeyIndexOptions, KeyIndexRejection, KeyIndexSourceIdentity, KeyMatchPage, KeyMatches,
-    KeyOrdinal, Limits, MatchBasis, MddFile, MddResource, MddResourceSpan, MdxEntry, MdxFile,
-    MemoryUsage, OpenOptions, Passcode, Result,
+    KeyOrdinal, Limits, MatchBasis, MatchMode, MddFile, MddResource, MddResourceSpan, MdxEntry,
+    MdxFile, MemoryUsage, OpenOptions, Passcode, Result,
 };
 
 fn assert_fused_result_iter<T>(_iterator: impl FusedIterator<Item = Result<T>>) {}
@@ -27,6 +27,9 @@ fn mdx_contract(file: &MdxFile, ordinal: KeyOrdinal) -> Result<()> {
     let _: Option<MdxEntry> = file.entry_at(ordinal)?;
     let _: Option<KeyMatches> = file.locate("query")?;
     let _: Option<KeyMatchPage> = file.locate_page("query", 0, 10)?;
+    let _: Option<KeyMatches> = file.locate_with_mode("query", MatchMode::IncludeCaseVariants)?;
+    let _: Option<KeyMatchPage> =
+        file.locate_page_with_mode("query", 0, 10, MatchMode::IncludeCaseVariants)?;
     let _: Option<MdxEntry> = file.lookup("query")?;
     Ok(())
 }
@@ -70,6 +73,15 @@ where
     let _: bool = index.is_empty();
     let _: Option<KeyMatches> = file.locate_with_key_index(&index, "query")?;
     let _: Option<KeyMatchPage> = file.locate_page_with_key_index(&index, "query", 0, 10)?;
+    let _: Option<KeyMatches> =
+        file.locate_with_key_index_and_mode(&index, "query", MatchMode::IncludeCaseVariants)?;
+    let _: Option<KeyMatchPage> = file.locate_page_with_key_index_and_mode(
+        &index,
+        "query",
+        0,
+        10,
+        MatchMode::IncludeCaseVariants,
+    )?;
     let _: Vec<KeyEntry> = file.prefix_keys_with_index(&index, "prefix", 10)?;
     file.scan_normalized_keys_with_index(&index, |_, _| ControlFlow::Continue(()))?;
     Ok(())

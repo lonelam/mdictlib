@@ -8,7 +8,7 @@ use crate::core::{MdictFile, RecordDescriptor, RecordIter};
 use crate::error::Result;
 use crate::format::TextEncoding;
 use crate::index::{KeyIndex, KeyIndexBuild, KeyIndexOptions, KeyIndexSourceIdentity};
-use crate::lookup::{KeyMatchPage, KeyMatches};
+use crate::lookup::{KeyMatchPage, KeyMatches, MatchMode};
 use crate::types::{ContainerKind, Header, KeyEntry, KeyOrdinal, MemoryUsage, OpenOptions};
 
 /// An opened MDX text dictionary.
@@ -189,6 +189,27 @@ impl MdxFile {
             .map(|matches| matches.map(KeyMatches::from_located))
     }
 
+    /// Locates entries using an explicit matching policy without reading records.
+    ///
+    /// [`MatchMode::PreferExact`] is identical to [`Self::locate`].
+    /// [`MatchMode::IncludeCaseVariants`] returns raw-exact rows followed by
+    /// case-only variants, in physical order within each group. It respects
+    /// `KeyCaseSensitive` and retains the ordinary header-normalized fallback
+    /// when no case-only match exists. See [`MatchMode`] for Unicode semantics.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if keys cannot be read or validated, or the locator or
+    /// complete match window exceeds its configured memory limits.
+    pub fn locate_with_mode(&self, query: &str, mode: MatchMode) -> Result<Option<KeyMatches>> {
+        if self.includes_case_variants(mode)
+            && let Some(page) = self.inner.locate_case_variants(query, 0, usize::MAX)?
+        {
+            return Ok(page.into_matches().map(KeyMatches::from_located));
+        }
+        self.locate(query)
+    }
+
     /// Locates a bounded window of matching physical entries without reading
     /// records or materializing the complete duplicate set.
     ///
@@ -212,6 +233,37 @@ impl MdxFile {
         self.inner
             .locate_key_page(query, offset, limit)
             .map(|page| page.map(KeyMatchPage::from_located))
+    }
+
+    /// Returns a bounded window in the order defined by [`Self::locate_with_mode`].
+    ///
+    /// Totals and match basis describe the complete result, including when
+    /// `limit` is zero or `offset` is beyond the end. Case-variant selection
+    /// visits source keys in the normalized equal range, never record bodies,
+    /// and retains at most `limit` ordinals. Sequential callers can cache a
+    /// bounded window to avoid repeating classification for each individual row.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if keys cannot be read or validated, or the locator or
+    /// requested page exceeds its configured memory limits.
+    pub fn locate_page_with_mode(
+        &self,
+        query: &str,
+        offset: usize,
+        limit: usize,
+        mode: MatchMode,
+    ) -> Result<Option<KeyMatchPage>> {
+        if self.includes_case_variants(mode)
+            && let Some(page) = self.inner.locate_case_variants(query, offset, limit)?
+        {
+            return Ok(Some(KeyMatchPage::from_located(page)));
+        }
+        self.locate_page(query, offset, limit)
+    }
+
+    fn includes_case_variants(&self, mode: MatchMode) -> bool {
+        mode == MatchMode::IncludeCaseVariants && !self.header().key_case_sensitive()
     }
 
     /// Locates physical entries whose key starts with `prefix` under the
@@ -360,6 +412,36 @@ impl MdxFile {
             .map(|matches| matches.map(KeyMatches::from_located))
     }
 
+    /// Applies [`Self::locate_with_mode`] through an existing persistent index.
+    ///
+    /// No additional index or format revision is needed. Case-variant selection
+    /// verifies source keys throughout the candidate equal range, including
+    /// candidates excluded by punctuation or whitespace differences.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the index or source fails validation or cannot be
+    /// read, or the complete match window exceeds its configured memory limits.
+    pub fn locate_with_key_index_and_mode(
+        &self,
+        index: &KeyIndex,
+        query: &str,
+        mode: MatchMode,
+    ) -> Result<Option<KeyMatches>> {
+        if self.includes_case_variants(mode)
+            && let Some(page) = crate::core::persistent::locate_case_variants(
+                &self.inner,
+                &index.inner,
+                query,
+                0,
+                usize::MAX,
+            )?
+        {
+            return Ok(page.into_matches().map(KeyMatches::from_located));
+        }
+        self.locate_with_key_index(index, query)
+    }
+
     /// Locates a bounded window of matching physical rows through a persistent
     /// key index without allocating the complete duplicate set.
     ///
@@ -382,6 +464,38 @@ impl MdxFile {
     ) -> Result<Option<KeyMatchPage>> {
         crate::core::persistent::locate_page(&self.inner, &index.inner, query, offset, limit)
             .map(|page| page.map(KeyMatchPage::from_located))
+    }
+
+    /// Applies [`Self::locate_page_with_mode`] through an existing persistent index.
+    ///
+    /// Ordering, totals, and match basis are identical to the in-memory query.
+    /// Source validation and bounded allocation follow
+    /// [`Self::locate_with_key_index_and_mode`] and [`Self::locate_page_with_mode`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the index or source fails validation or cannot be
+    /// read, or the requested page exceeds its configured memory limits.
+    pub fn locate_page_with_key_index_and_mode(
+        &self,
+        index: &KeyIndex,
+        query: &str,
+        offset: usize,
+        limit: usize,
+        mode: MatchMode,
+    ) -> Result<Option<KeyMatchPage>> {
+        if self.includes_case_variants(mode)
+            && let Some(page) = crate::core::persistent::locate_case_variants(
+                &self.inner,
+                &index.inner,
+                query,
+                offset,
+                limit,
+            )?
+        {
+            return Ok(Some(KeyMatchPage::from_located(page)));
+        }
+        self.locate_page_with_key_index(index, query, offset, limit)
     }
 
     /// Locates normalized-prefix rows through a persistent key index.

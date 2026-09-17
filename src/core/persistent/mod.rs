@@ -11,7 +11,7 @@ mod sort;
 
 pub(crate) use build::{build_to_path, build_to_writer, source_identity};
 pub(crate) use cache::{PersistentKeyIndex, open};
-pub(crate) use query::{locate, locate_page, prefix, scan};
+pub(crate) use query::{locate, locate_case_variants, locate_page, prefix, scan};
 
 const MAGIC: [u8; 8] = *b"MDKIDX01";
 const ENDIAN_MARKER: u32 = 0x0102_0304;

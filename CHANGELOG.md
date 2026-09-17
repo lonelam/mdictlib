@@ -4,6 +4,34 @@ All notable changes are recorded here.
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-09-18
+
+### Added
+
+- `MatchMode::{PreferExact, IncludeCaseVariants}` and four opt-in MDX query
+  methods covering complete/paged, in-memory/persistent-index lookup. Case
+  variants no longer disappear when an exact spelling exists; exact rows come
+  first, followed by variants, with physical order preserved within each group.
+- `MatchBasis::CaseVariants` reports the complete expanded match basis.
+  Case-sensitive headers remain authoritative, punctuation/whitespace are
+  preserved for case-only comparison, and the existing header-normalized
+  fallback remains available when no case-only match exists.
+
+### Compatibility And Performance
+
+- Existing MDX/MDD queries retain raw-exact-first behavior. Unicode comparison
+  reuses scalar lowercase, not locale-specific/full Unicode case folding.
+- Both backends share bounded selection over an existing normalized equal range.
+  Persistent candidates are source-verified, including filtered/out-of-page rows;
+  queries read no record bodies and allocate at most the requested ordinal window.
+- Persistent index format/normalization and `KEY_INDEX_REVISION` (`f3-p1-n1`)
+  are unchanged. No new hash, key-space copy, or index rebuild is introduced.
+
+### Fixed
+
+- File-URL integration fixtures now construct valid Windows drive URLs, restoring
+  the existing cross-platform test gate without changing URL parsing.
+
 ## [0.2.6] - 2026-09-07
 
 ### Added

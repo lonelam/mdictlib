@@ -82,18 +82,19 @@ fuzzy search, mmap, and persistent MDD sidecars are out of scope.
 
 ```toml
 [dependencies]
-mdictlib = "0.2.6"
+mdictlib = "0.2.7"
 ```
 
 Enable LZO when required by a dictionary:
 
 ```toml
 [dependencies]
-mdictlib = { version = "0.2.6", features = ["lzo"] }
+mdictlib = { version = "0.2.7", features = ["lzo"] }
 ```
 
-`0.2.6` is the published crates.io release. It accepts a `file://` URL wherever
-a dictionary path is accepted, which is how a mobile file picker names a file.
+`0.2.7` adds opt-in case-variant queries. Existing lookup methods retain their
+raw-exact-first behavior. A `file://` URL is accepted wherever a dictionary path
+is accepted, which is how a mobile file picker names a file.
 
 ## MDX
 
@@ -140,6 +141,58 @@ ordinal in physical order and reports `RawExact` or `HeaderNormalized`.
 `locate_page()` preserves the same global basis, total, duplicate identity, and
 order while retaining only the requested ordinal window. `MddFile` exposes the
 same paged locator for resource keys.
+
+## Including Case Variants
+
+A merged dictionary can store `Make`, `make`, and `MAKE` as independent entries.
+Use `MatchMode::IncludeCaseVariants` when browsing should include all of them:
+
+```rust,no_run
+use mdictlib::{MatchMode, MdxFile};
+
+let dictionary = MdxFile::open("dictionary.mdx")?;
+if let Some(page) = dictionary.locate_page_with_mode(
+    "make", 0, 20, MatchMode::IncludeCaseVariants,
+)? {
+    for ordinal in page.iter() {
+        let entry = dictionary.entry_at(ordinal)?.unwrap();
+        println!("{}: {}", entry.key(), entry.text());
+    }
+}
+# Ok::<(), mdictlib::Error>(())
+```
+
+- Raw-exact rows come first; case variants follow. Each group retains physical
+  order and every duplicate ordinal. `MatchBasis::CaseVariants` describes the
+  entire result when at least one non-exact spelling exists, even when a page
+  contains only exact rows or is empty. Exact-only results remain `RawExact`.
+- `KeyCaseSensitive=Yes` keeps ordinary matching. Otherwise comparison uses
+  the index's Unicode scalar lowercase, without removing punctuation or spaces.
+  This is not full Unicode case folding: `Straße` and `STRASSE`, and Greek
+  final/non-final sigma, do not become new equivalents.
+- When no case-only match exists, the existing header-normalized fallback
+  remains available (including `StripKey` if the publisher enabled it).
+- `locate_with_mode` returns the complete set. Its paged counterpart retains
+  only a bounded ordinal window. `MatchMode::PreferExact`, the default mode,
+  reproduces the original methods, which are unchanged.
+- `locate_with_key_index_and_mode` and `locate_page_with_key_index_and_mode`
+  offer identical results through an existing persistent index. They never
+  construct the in-memory locator.
+
+Case selection reuses the normalized equal range and checks its source keys;
+no record bodies, full-dictionary scan after indexing, new content hashes, or
+second key-space index are involved. One pass classifies the equal range and
+counts matches; pages that reach variants make a second bounded-range pass
+until their window is full. Retained ordinals are bounded by the page limit;
+complete-set queries are subject to the same locator/aggregate memory limits.
+As with ordinary exact pagination, cache a bounded window for sequential reads
+instead of repeating a one-row query. `KEY_INDEX_REVISION` stays `f3-p1-n1`:
+index bytes and normalization are unchanged, so existing indexes need no rebuild.
+
+A host should keep its primary-entry selection separate from expanded browsing
+when history, explanations, or study state depend on the chosen headword. The
+library returns physical entries; it does not resolve `@@@LINK` redirects or
+choose a contextual meaning.
 
 ## Persistent MDX Key Indexes
 

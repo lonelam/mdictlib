@@ -124,7 +124,7 @@ dependencies = [
 
 [[package]]
 name = "mdictlib"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "encoding_rs",
  "lzokay",

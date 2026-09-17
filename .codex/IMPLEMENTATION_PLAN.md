@@ -1,15 +1,29 @@
 # mdictlib Implementation Roadmap
 
-Last updated: 2026-09-07 (v0.2.6 published)
+Last updated: 2026-09-18 (v0.2.7 release candidate; v0.2.6 published)
 
 ## 1. Release State And Active Program
+
+The active `0.2.7` program adds explicit case-variant matching for MDX. Its
+complete/paged APIs operate on both existing locator backends, with exact rows
+first and variants second. Selection shares one version-blind core, honors
+case-sensitive headers, retains punctuation for case-only comparisons, and
+keeps ordinary header fallback on a case-only miss. Default queries are unchanged.
+
+The implementation reuses the existing normalized equal range and source-key
+validation, reads no record payloads, retains O(page limit) ordinals, and performs
+at most two range passes for a case match. No new hash, serialized field, extra
+key-space index, or normalization revision is introduced. Existing `f3-p1-n1`
+artifacts remain usable without migration. Publication is explicitly authorized
+for this task; application adoption remains separate from the library release.
 
 `mdictlib` `0.1.0` is the first public release and supports MDict major version
 2 only. Every milestone in the released roadmap (sections 6 and 10) is complete.
 
 The **MDict version 1 compatibility program is implemented**. Milestones 1
 through 6 are complete, and its `0.2.0` release decision is historical.
-Crate metadata and crates.io are now at released **`0.2.6`**, which accepts
+Crates.io is at released **`0.2.6`**; crate metadata is the **`0.2.7`**
+candidate. Version `0.2.6` accepts
 `file://` URLs wherever a dictionary path is accepted; the repository exposes
 the `v0.2.6` tag.
 
@@ -33,7 +47,7 @@ Evidence rules (unchanged, and binding on the v1 program):
 - a number carried forward from an earlier session without a tracked artifact is
   labelled as such and must be re-derived before it can gate anything.
 
-### 1.1 Active `0.2.4` persistent-index release sequence
+### 1.1 Historical persistent-index release sequence
 
 This is the mdictlib portion of AALookup's 2,000-dictionary program. The
 application-level roadmap is

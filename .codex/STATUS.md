@@ -1,9 +1,21 @@
 # mdictlib Status
 
-Last updated: 2026-09-07 (v0.2.6 published)
+Last updated: 2026-09-18 (v0.2.7 release candidate; v0.2.6 published)
 
 ## Current Snapshot
 
+- `0.2.7` adds opt-in `MatchMode::IncludeCaseVariants` to complete and paged MDX
+  queries, for both the process locator and persistent indexes. Exact spellings
+  precede variants; both groups retain physical order. Existing queries and MDD
+  behavior are unchanged. No wire/normalization/index revision changes or rebuilds
+  are required. Publication is explicitly authorized by the maintainer for this task.
+- The shared selector reads only source keys in the existing normalized equal
+  range. It preserves punctuation and whitespace for case-only comparison,
+  honors case-sensitive headers, and uses scalar Unicode lowercase. An empty
+  case-only result retains the ordinary header-normalized fallback.
+- Synthetic checks cover both wire versions, both checksum policies, all four
+  APIs, duplicate/pagination boundaries, Unicode, punctuation, empty dictionaries,
+  lazy record bodies, changed source keys, and bounded large-range memory.
 - `mdictlib` `0.2.6` is the current crates.io release. The crate supports MDict
   major versions 1 and 2 for MDX and MDD.
 - Version 1 support is implemented, tested against independent synthetic
@@ -12,10 +24,9 @@ Last updated: 2026-09-07 (v0.2.6 published)
   carries a structured retained classification.
 - The compatible persistent MDX key-index facility and explicit checksum policy
   are implemented and released in `0.2.5`.
-- AALookup integration has started against this adjacent `0.2.6` checkout: its
-  normal build now compiles the persistent-index API by default, without a
-  Cargo feature or build-script environment `cfg` gate. This local path is an
-  integration bridge, not a published dependency or release cutover.
+- AALookup already consumes registry `0.2.6` (verified 2026-09-18). Its adoption
+  of the new `0.2.7` browsing mode is a separate application change; merely
+  upgrading the crate will not change existing lookup behavior.
 - Real v1 MDD is **validated**: 16 approved artifacts were acquired into the
   ignored cache and all 16 passed full validation, 14 of them declaring
   version 1.2.
@@ -55,7 +66,7 @@ Public root facade:
 
 - `MdxFile`, `MdxEntry`
 - `MddFile`, `MddResource`, `MddResourceSpan`
-- `KeyEntry`, `KeyOrdinal`, `KeyMatches`, `KeyMatchPage`, `MatchBasis`
+- `KeyEntry`, `KeyOrdinal`, `KeyMatches`, `KeyMatchPage`, `MatchBasis`, `MatchMode`
 - `KeyIndex`, `KeyIndexOptions`, `KeyIndexSourceIdentity`, `KeyIndexBuild`,
   `KeyIndexRejection`, and stable key-index revision constants
 - `Header`, `OpenOptions`, `Passcode`, `Limits`, `MemoryUsage`
@@ -841,6 +852,21 @@ diagnostic regression policy are recorded in
 `.codex/benchmarks/2026-08-10-macos-arm64.md`. These are the frozen v2
 baselines the v1 program must not regress.
 
+## 0.2.7 Release Validation (2026-09-18)
+
+- Windows: default and all-feature all-target suites passed; only the three
+  explicit private-corpus suites are ignored. Case-variant, public-API, and
+  file-URL focused checks passed. Formatting, warning-free all-target/all-feature
+  Clippy, doctests, and strict rustdoc passed.
+- Corrected the pre-existing file-URL fixtures to emit valid drive URLs on
+  Windows. Production URL parsing is unchanged.
+- The Linux CI quality job remains the gate for Node corpus tooling and fuzzing.
+  Local Windows Node 22.17.1 and 24.19.0 both pass 44 of 46 corpus tests; two
+  symlink-path tests fail with Windows `lstat UNKNOWN` before the asserted
+  rejection. The corpus scripts are unchanged and are not packaged in the crate.
+- Package verification, real CROWN/ODE checks, and cross-platform CI are pending
+  before publication.
+
 ## Release Hygiene
 
 - `.github/workflows/ci.yml` exists.
@@ -879,10 +905,8 @@ baselines the v1 program must not regress.
 5. Extend the new Windows OALD/辭海/TLD persistent-index measurements to the
    authorized multi-platform corpus, including cold/warm positional reads and
    host-level handle residency, before assigning cross-machine expectations.
-6. Move AALookup and its dictionary-scale harness from the adjacent-checkout
-   bridge to the registry `0.2.6` dependency, update
-   their lockfiles and parser-boundary assertion together, and keep the default
-   integration free of Cargo-feature and environment-`cfg` gates.
+6. Adopt registry `0.2.7` in AALookup and explicitly enable case variants for
+   browsing while preserving primary selection and source-bound navigation.
 
 ## Known Risks
 

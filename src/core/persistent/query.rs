@@ -12,6 +12,41 @@ use crate::limits::{
 };
 use crate::types::{KeyEntry, KeyOrdinal};
 
+pub(crate) fn locate_case_variants(
+    dictionary: &MdictFile,
+    index: &PersistentKeyIndex,
+    query: &str,
+    offset: usize,
+    limit: usize,
+) -> Result<Option<LocatedKeyPage>> {
+    validate_dictionary_identity(dictionary, &index.source_identity())?;
+    let normalized_len = dictionary.normalizer.normalized_len(query)?;
+    ensure_usize_limit(
+        "normalized_query_bytes",
+        normalized_len,
+        dictionary.limits.locator_bytes,
+    )?;
+    let _query_memory = dictionary
+        .memory
+        .reserve(normalized_len, "persistent case-variant query")?;
+    let normalized = dictionary.normalizer.normalize(query)?;
+    let Some((start, end)) = index.equal_range(&normalized)? else {
+        return Ok(None);
+    };
+    let count = checked_usize(
+        end.checked_sub(start)
+            .ok_or_else(|| reject(KeyIndexRejection::InvalidLayout("order range is inverted")))?,
+        "persistent case-variant count",
+    )?;
+    super::super::case_variants::select_page(dictionary, query, count, offset, limit, |position| {
+        let position = u64::try_from(position)
+            .map_err(|_| Error::InvalidFormat("case-variant position exceeds u64"))?;
+        let ordinal = index.order_at(start + position)?;
+        let key = verified_source_key(dictionary, index, ordinal, &normalized)?;
+        Ok((ordinal, key))
+    })
+}
+
 pub(crate) fn locate(
     dictionary: &MdictFile,
     index: &PersistentKeyIndex,

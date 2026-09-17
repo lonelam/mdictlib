@@ -3,6 +3,23 @@ use std::fmt;
 use crate::core::{LocatedKeyPage, LocatedKeys, LocatorBasis};
 use crate::types::KeyOrdinal;
 
+/// Controls whether an MDX query also returns differently cased headwords.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum MatchMode {
+    /// Return raw-exact matches, falling back to header normalization on a miss.
+    #[default]
+    PreferExact,
+    /// Include case variants, with raw-exact matches first and physical order
+    /// within each group. Respect `KeyCaseSensitive`; preserve punctuation and
+    /// whitespace when comparing case variants. If no case-only match exists,
+    /// retain the ordinary header-normalized fallback.
+    ///
+    /// Comparison uses Unicode scalar lowercase, as the existing MDX index
+    /// does, rather than locale-specific or full Unicode case folding.
+    IncludeCaseVariants,
+}
+
 /// Describes why a key query matched physical dictionary entries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -11,12 +28,16 @@ pub enum MatchBasis {
     RawExact,
     /// No raw key matched globally, so header-controlled normalization was used.
     HeaderNormalized,
+    /// Case-only matches, including at least one non-exact spelling. Raw-exact
+    /// rows precede variants; each group retains ascending physical order.
+    CaseVariants,
 }
 
 /// A non-empty, duplicate-preserving set of physical key matches.
 ///
-/// Matches are ordered by [`KeyOrdinal`]. Cloning this value does not copy the
-/// underlying keys or locator indices.
+/// Matches are ordered by [`KeyOrdinal`], except that
+/// [`MatchMode::IncludeCaseVariants`] places raw-exact rows before variants.
+/// Cloning this value does not copy the underlying keys or locator indices.
 #[derive(Clone)]
 pub struct KeyMatches {
     inner: LocatedKeys,
@@ -25,8 +46,8 @@ pub struct KeyMatches {
 /// A bounded, duplicate-preserving window of physical key matches.
 ///
 /// The page may be empty when `offset` is at or beyond [`Self::total`]. Its
-/// basis and total still describe the complete match set. Ordinals retain
-/// ascending physical order, and the allocation retained by this value is
+/// basis and total still describe the complete match set. Ordering follows
+/// [`KeyMatches`], and the allocation retained by this value is
 /// proportional to [`Self::len`], not [`Self::total`].
 pub struct KeyMatchPage {
     inner: LocatedKeyPage,
@@ -37,11 +58,12 @@ impl KeyMatchPage {
         Self { inner }
     }
 
-    /// Returns whether the complete query matched raw or normalized text.
+    /// Returns the matching basis of the complete query, not just this page.
     pub const fn basis(&self) -> MatchBasis {
         match self.inner.basis() {
             LocatorBasis::RawExact => MatchBasis::RawExact,
             LocatorBasis::HeaderNormalized => MatchBasis::HeaderNormalized,
+            LocatorBasis::CaseVariants => MatchBasis::CaseVariants,
         }
     }
 
@@ -60,12 +82,12 @@ impl KeyMatchPage {
         self.inner.is_empty()
     }
 
-    /// Returns one page ordinal by position in ascending physical order.
+    /// Returns one page ordinal by position in the selected match order.
     pub fn get(&self, index: usize) -> Option<KeyOrdinal> {
         self.inner.ordinal_at(index)
     }
 
-    /// Iterates over this page's ordinals in ascending physical order.
+    /// Iterates over this page's ordinals in the selected match order.
     pub fn iter(&self) -> impl ExactSizeIterator<Item = KeyOrdinal> + '_ {
         (0..self.len()).map(|index| {
             self.inner
@@ -81,11 +103,12 @@ impl KeyMatches {
         Self { inner }
     }
 
-    /// Returns whether the query matched raw text or normalized fallback text.
+    /// Returns whether the query used raw equality, case variants, or header fallback.
     pub const fn basis(&self) -> MatchBasis {
         match self.inner.basis() {
             LocatorBasis::RawExact => MatchBasis::RawExact,
             LocatorBasis::HeaderNormalized => MatchBasis::HeaderNormalized,
+            LocatorBasis::CaseVariants => MatchBasis::CaseVariants,
         }
     }
 
@@ -101,19 +124,19 @@ impl KeyMatches {
         self.inner.is_empty()
     }
 
-    /// Returns the lowest matching physical ordinal.
+    /// Returns the first ordinal in the selected match order.
     pub fn first(&self) -> KeyOrdinal {
         self.inner
             .ordinal_at(0)
             .expect("KeyMatches always contains at least one ordinal")
     }
 
-    /// Returns one matching ordinal by position in physical order.
+    /// Returns one matching ordinal by position in the selected match order.
     pub fn get(&self, index: usize) -> Option<KeyOrdinal> {
         self.inner.ordinal_at(index)
     }
 
-    /// Iterates over matching ordinals in ascending physical order.
+    /// Iterates over matching ordinals in the selected match order.
     pub fn iter(&self) -> impl ExactSizeIterator<Item = KeyOrdinal> + '_ {
         (0..self.len()).map(|index| {
             self.inner

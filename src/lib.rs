@@ -3,8 +3,9 @@
 //! MDX and MDD share one defensive, file-backed parsing core. Opening parses
 //! bounded metadata and block indexes; key and record blocks remain lazy.
 //!
-//! Physical ordinals preserve duplicate identity. Global raw-exact lookup wins
-//! before header-normalized fallback, and MDD resources can be streamed through
+//! Physical ordinals preserve duplicate identity. By default, raw-exact lookup
+//! wins before header-normalized fallback. MDX can opt into [`MatchMode`] to
+//! include case variants after exact rows. MDD resources can be streamed through
 //! source-bound spans. Per-open limits bound untrusted input and parser work.
 //! MDX callers may optionally build a bounded, source-bound persistent key
 //! index and reopen it through safe lazy positional reads; artifact placement
@@ -48,7 +49,7 @@ pub use index::{
     KEY_INDEX_REVISION, KeyIndex, KeyIndexBuild, KeyIndexOptions, KeyIndexRejection,
     KeyIndexSourceIdentity,
 };
-pub use lookup::{KeyMatchPage, KeyMatches, MatchBasis};
+pub use lookup::{KeyMatchPage, KeyMatches, MatchBasis, MatchMode};
 pub use mdd::{MddFile, MddResource, MddResourceSpan};
 pub use mdx::{MdxEntry, MdxFile};
 pub use types::{

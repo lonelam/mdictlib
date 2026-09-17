@@ -17,7 +17,12 @@ use support::{FixtureBuilder, TempDictionary};
 /// The same file, addressed as a picker would address it.
 fn file_url(dictionary: &TempDictionary) -> PathBuf {
     let path = dictionary.path().to_str().expect("a UTF-8 temporary path");
-    PathBuf::from(format!("file://{path}"))
+    let path = path
+        .replace('\\', "/")
+        .replace('%', "%25")
+        .replace(' ', "%20");
+    let separator = if path.starts_with('/') { "" } else { "/" };
+    PathBuf::from(format!("file://{separator}{path}"))
 }
 
 #[test]
@@ -62,7 +67,7 @@ fn a_percent_escaped_name_opens_the_file_it_names() {
         .build()
         .write("file url with spaces");
     let path = dictionary.path().to_str().expect("a UTF-8 temporary path");
-    let escaped = PathBuf::from(format!("file://{}", path.replace(' ', "%20")));
+    let escaped = file_url(&dictionary);
 
     assert!(
         path.contains(' '),
